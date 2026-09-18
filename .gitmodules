@@ -1,0 +1,3 @@
+[submodule "third_party/MARS"]
+	path = third_party/MARS
+	url = https://github.com/SizheAn/MARS.git
