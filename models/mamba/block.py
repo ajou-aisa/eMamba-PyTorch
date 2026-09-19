@@ -26,7 +26,7 @@ class EMambaBlock(nn.Module):
         self.conv = MambaConv1D(self.d_inner)
         self.ssm = SelectiveSSM(self.d_inner, d_state)
 
-        self.output_proj = nn.Linear(d_model, self.d_inner)
+        self.output_proj = nn.Linear(self.d_inner, d_model)
 
     def forward(self, tokens: Tensor) -> Tensor:
         residual = tokens
