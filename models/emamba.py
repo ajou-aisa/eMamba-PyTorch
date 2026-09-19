@@ -1,6 +1,6 @@
 import torch.nn as nn
 
-from .emamba_block import EMambaBlock
+from .mamba.block import EMambaBlock
 
 
 class EMamba(nn.Module):
