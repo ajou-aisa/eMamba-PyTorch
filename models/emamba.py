@@ -1,18 +1,25 @@
-import torch.nn as nn
+"""eMamba composition: patch embedding -> Mamba blocks -> output head."""
 
-from .mamba.block import EMambaBlock
+from torch import Tensor, nn
+
+from .mamba import EMambaBlock
+from .output_head import OutputHead
+from .patch_embedding import PatchEmbedding
 
 
 class EMamba(nn.Module):
+    """MARS interface: [B, 8, 8, 5] -> [B, 57]."""
+
     def __init__(
         self,
-        d_model=20,
-        expand=2,
-        patch_size=2,
-        num_blocks=2,
-        d_state=8,
-        out_dim=57,
-    ):
+        d_model: int = 20,
+        expand: int = 2,
+        patch_size: int = 2,
+        num_blocks: int = 2,
+        d_state: int = 8,
+        out_dim: int = 57,
+        in_channels: int = 5,
+    ) -> None:
         super().__init__()
 
         self.d_model = d_model
@@ -21,18 +28,21 @@ class EMamba(nn.Module):
         self.num_blocks = num_blocks
         self.d_state = d_state
 
-        # Mamba blocks
+        self.patch_embedding = PatchEmbedding(
+            in_channels = in_channels,
+            patch_size = patch_size,
+            d_model = d_model,
+        )
         self.blocks = nn.ModuleList([
-            EMambaBlock(
-                d_model=d_model,
-                expand=expand,
-                d_state=d_state,
-            )
+            EMambaBlock(d_model = d_model, expand = expand, d_state = d_state)
             for _ in range(num_blocks)
         ])
+        self.head = OutputHead(d_model = d_model, out_dim = out_dim)
 
-        # 19 joints × (x, y, z)
-        self.head = nn.Linear(d_model, out_dim)
+    def forward(self, frames: Tensor) -> Tensor:
+        tokens = self.patch_embedding(frames)
 
-    def forward(self, x):
-        raise NotImplementedError
+        for block in self.blocks:
+            tokens = block(tokens)
+
+        return self.head(tokens)
