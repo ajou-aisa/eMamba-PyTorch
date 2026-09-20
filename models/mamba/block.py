@@ -53,6 +53,16 @@ class MambaConv1D(nn.Module):
     def __init__(self, d_inner: int) -> None:
         super().__init__()
         self.d_inner = d_inner
+        self.d_conv = 4
+
+        self.conv1d = nn.Conv1d(
+            in_channels = self.d_inner,
+            out_channels = self.d_inner,
+            kernel_size = self.d_conv,
+            groups = self.d_inner,
+            padding = self.d_conv - 1,
+            bias = True,
+        )
 
     def forward(self, tokens: Tensor) -> Tensor:
         # TODO:
@@ -63,6 +73,16 @@ class MambaConv1D(nn.Module):
         #
         # Interface:
         #   [B, L, ED] -> [B, L, ED]
+
+        seq_len = tokens.shape[1]
+
+        hidden = tokens.transpose(1, 2)     #[B, ED, L]
+        hidden = self.conv1d(hidden)        #[B, ED, L + 3]
+        hidden = hidden[..., :seq_len]      #[B, ED, L]
+        hidden = hidden.transpose(1, 2)     #[B, L, ED]
+        
+        return hidden
+
         raise NotImplementedError(
             "MambaConv1D configuration is not specified yet."
         )
