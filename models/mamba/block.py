@@ -15,6 +15,9 @@ class EMambaBlock(nn.Module):
         self.d_inner = d_model * expand
         self.d_state = d_state
 
+        # dt_rank = ceil(D / 16)
+        self.dt_rank = max(1, (d_model + 15) // 16)
+
         self.norm = RangeNorm(d_model)
 
         # Upper path: projection -> SiLU.
@@ -24,7 +27,11 @@ class EMambaBlock(nn.Module):
         # Lower path: projection -> convolution -> SSM.
         self.input_proj = nn.Linear(d_model, self.d_inner)
         self.conv = MambaConv1D(self.d_inner)
-        self.ssm = SelectiveSSM(self.d_inner, d_state)
+        self.ssm = SelectiveSSM(
+            d_inner=self.d_inner,
+            d_state=d_state,
+            dt_rank=self.dt_rank,
+        )
 
         self.output_proj = nn.Linear(self.d_inner, d_model)
 
