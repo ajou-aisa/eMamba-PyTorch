@@ -12,16 +12,60 @@ class PatchEmbedding(nn.Module):
         self.patch_size = patch_size
         self.d_model = d_model
 
+        patch_dim = patch_size * patch_size * in_channels
+        if patch_dim != d_model:
+            raise ValueError(
+                f"patch_dim {patch_dim} != d_model {d_model}"
+            )
+
     def forward(self, frames: Tensor) -> Tensor:
-        # TODO:
-        # 1. Split the H x W input into non-overlapping P x P patches.
-        # 2. Flatten each patch into one token.
-        # 3. Return a token sequence with shape [B, L, D].
-        #
-        # For MARS: [B, 8, 8, 5] -> [B, 16, 20].
-        # The paper does not specify whether an additional learnable
-        # projection is used after patch extraction.
-        raise NotImplementedError
+        if frames.ndim != 4:
+            raise ValueError(
+                f"frames.ndim {frames.ndim} != 4"
+            )
+
+        B, H, W, C = frames.shape
+        P = self.patch_size
+
+        if C != self.in_channels:
+            raise ValueError(
+                f"C {C} != in_channels {self.in_channels}"
+            )
+
+        if H % P != 0 or W % P != 0:
+            raise ValueError(
+                f"H % P {H % P} != 0 or W % P {W % P} != 0"
+            )
+
+        # [B, H, W, C]
+        # -> [B, H/P, P, W/P, P, C]
+        patches = frames.reshape(
+            B,
+            H // P,
+            P,
+            W // P,
+            P,
+            C,
+        )
+
+        # [B, H/P, P, W/P, P, C]
+        # -> [B, H/P, W/P, P, P, C]
+        patches = patches.permute(
+            0, 1, 3, 2, 4, 5
+        )
+
+        # Number of patches
+        L = (H // P) * (W // P)
+
+        # [B, H/P, W/P, P, P, C]
+        # -> [B, L, D]
+        tokens = patches.reshape(
+            B,
+            L,
+            self.d_model,
+        )
+
+        return tokens
 
     def extra_repr(self) -> str:
         return (
