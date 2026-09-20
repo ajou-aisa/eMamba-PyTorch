@@ -50,10 +50,10 @@ class EMambaBlock(nn.Module):
 class MambaConv1D(nn.Module):
     """1D convolution stage in the lower Mamba path."""
 
-    def __init__(self, d_inner: int) -> None:
+    def __init__(self, d_inner: int, d_conv: int = 4) -> None:
         super().__init__()
         self.d_inner = d_inner
-        self.d_conv = 4
+        self.d_conv = d_conv
 
         self.conv1d = nn.Conv1d(
             in_channels = self.d_inner,
@@ -65,24 +65,19 @@ class MambaConv1D(nn.Module):
         )
 
     def forward(self, tokens: Tensor) -> Tensor:
-        # TODO:
-        # Apply the 1D convolution shown in Figure 3 over the token sequence.
-        #
-        # The paper specifies this stage but does not provide enough detail
-        # to fix kernel size, padding, grouping, or boundary handling.
-        #
-        # Interface:
-        #   [B, L, ED] -> [B, L, ED]
 
-        seq_len = tokens.shape[1]
+        # Interface: [B, L, ED] -> [B, L, ED]
+        seq_len = tokens.size(1)
 
-        hidden = tokens.transpose(1, 2)     #[B, ED, L]
-        hidden = self.conv1d(hidden)        #[B, ED, L + 3]
-        hidden = hidden[..., :seq_len]      #[B, ED, L]
-        hidden = hidden.transpose(1, 2)     #[B, L, ED]
+        #[B, L, ED] -> [B, ED, L]
+        hidden = tokens.transpose(1, 2).contiguous()
+
+        #[B, ED, L] -> [B, ED, L + d_conv - 1]
+        hidden = self.conv1d(hidden)
+
+        hidden = hidden[..., :seq_len].contiguous()
+
+        #[B, ED, L] -> [B, L, ED]
+        hidden = hidden.transpose(1, 2).contiguous()
         
         return hidden
-
-        raise NotImplementedError(
-            "MambaConv1D configuration is not specified yet."
-        )
