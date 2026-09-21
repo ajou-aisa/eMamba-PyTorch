@@ -19,8 +19,11 @@ class EMamba(nn.Module):
         d_state: int = 8,
         out_dim: int = 57,
         in_channels: int = 5,
+        readout: str = "mean",
     ) -> None:
         super().__init__()
+        if num_blocks <= 0:
+            raise ValueError("num_blocks must be positive")
 
         self.d_model = d_model
         self.expand = expand
@@ -37,7 +40,7 @@ class EMamba(nn.Module):
             EMambaBlock(d_model = d_model, expand = expand, d_state = d_state)
             for _ in range(num_blocks)
         ])
-        self.head = OutputHead(d_model = d_model, out_dim = out_dim)
+        self.head = OutputHead(d_model=d_model, out_dim=out_dim, readout=readout)
 
     def forward(self, frames: Tensor) -> Tensor:
         tokens = self.patch_embedding(frames)

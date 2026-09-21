@@ -8,6 +8,8 @@ class PatchEmbedding(nn.Module):
 
     def __init__(self, in_channels: int, patch_size: int, d_model: int) -> None:
         super().__init__()
+        if in_channels <= 0 or patch_size <= 0 or d_model <= 0:
+            raise ValueError("in_channels, patch_size, and d_model must be positive")
         self.in_channels = in_channels
         self.patch_size = patch_size
         self.d_model = d_model
@@ -72,3 +74,7 @@ class PatchEmbedding(nn.Module):
             f"in_channels={self.in_channels}, patch_size={self.patch_size}, "
             f"d_model={self.d_model}"
         )
+
+
+# Reproduction assumption: patches are row-major flattened values without a
+# learnable projection. The paper does not establish this embedding detail.

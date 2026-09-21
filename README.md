@@ -1,219 +1,134 @@
-# eMamba PyTorch
+# eMamba PyTorch: provisional FP32 MARS baseline
 
-PyTorch reimplementation of the MARS configuration from  
-**eMamba: Efficient Acceleration Framework for Mamba Models in Edge Computing**.
+`provisional_fp32_v1` is a trainable FP32 baseline for public MARS data.
+It is **not** a verified reconstruction of the authors' model. Details absent
+from the paper remain reproduction choices pending author confirmation.
 
-The goal of this project is to reproduce the FP32 eMamba model on the
-public MARS dataset and compare the result with the accuracy reported in
-the paper.
-
-## Model Configuration
-
-MARS configuration reported in the eMamba paper:
-
-| Parameter | Value |
-|---|---:|
-| Model dimension (`D`) | 20 |
-| Expansion factor (`E`) | 2 |
-| Patch size (`P`) | 2 |
-| Number of Mamba blocks (`M`) | 2 |
-| State dimension (`N`) | 8 |
-| Output dimension | 57 |
-
-High-level architecture:
+## Structure
 
 ```text
-MARS Input [8, 8, 5]
-        │
-        ▼
-Patch Embedding (P=2)
-        │
-        ▼
-16 Tokens × D=20
-        │
-        ▼
-eMamba Block × 2
-        │
-        ▼
-Output Head
-        │
-        ▼
-57 values
-(19 joints × XYZ)
-````
-
-The paper reports an FP32 MARS RMSE of approximately **7.85 cm**. 
-
-## Repository Structure
-
-```text
-.
-├── datasets/
-│   └── mars.py
-├── models/
-│   ├── emamba.py
-│   ├── emamba_block.py
-│   ├── range_norm.py
-│   └── selective_ssm.py
-├── third_party/
-│   └── MARS/
-├── requirements.txt
-├── README.md
-└── train.py
+datasets/mars.py              MARS NumPy loader and integrity checks
+models/patch_embedding.py     row-major 2×2 flattening
+models/mamba/block.py         RangeNorm, gate, causal depthwise Conv, SSM, residual
+models/mamba/range_norm.py    range normalization over D
+models/mamba/selective_ssm.py sequential selective recurrence
+models/emamba.py              Patch, two blocks, OutputHead
+models/output_head.py         mean or last readout and one Linear
+train.py                      smoke, FP32 training, validation, eval, checkpoints
+tests/                        unit and pipeline checks
+test_conv.py                  original causal Conv check
+third_party/MARS/feature/     public MARS NumPy files from submodule
 ```
+
+Paper-reported MARS dimensions: D=20, E=2 (ED=40), P=2, M=2, N=8,
+and 57 outputs. Default model has **9,077 parameters** and **36,308 bytes**
+of FP32 parameter data (35.46 KiB). The paper reports 67.3 KB for its
+model; no layers were added to match that size. Serialized `.pt` files
+also include optimizer state and metadata, so file size differs.
 
 ## Setup
 
-### 1. Clone the repository
-
-Clone this repository together with the MARS dataset submodule:
-
 ```bash
-git clone --recurse-submodules <repository-url>
-cd eMamba
-````
-
-If you already cloned the repository without the submodule, initialize it manually:
-
-```bash
-git submodule update --init --recursive
-```
-
-After this step, the MARS dataset should be available under:
-
-```text
-third_party/MARS/
-```
-
-You can check that the dataset files exist with:
-
-```bash
-ls third_party/MARS/feature
-```
-
-You should see files such as:
-
-```text
-featuremap_train.npy
-featuremap_validate.npy
-featuremap_test.npy
-labels_train.npy
-labels_validate.npy
-labels_test.npy
-```
-
-### 2. Create a Python virtual environment
-
-Python 3.11 is recommended.
-
-Check your Python version:
-
-```bash
-python3.11 --version
-```
-
-Create a virtual environment:
-
-```bash
+git clone --recurse-submodules https://github.com/ajou-aisa/eMamba-PyTorch
+cd eMamba-PyTorch
 python3.11 -m venv .venv
-```
-
-Activate it:
-
-```bash
 source .venv/bin/activate
+python -m pip install -r requirements.txt
 ```
 
-After activation, your shell prompt should show something like:
+For an existing clone, run `git submodule update --init --recursive`.
+Default data path is `third_party/MARS/feature/`, resolved relative to
+`train.py`. Use `--data-root /path/to/feature` for another location.
+The unchanged public files are:
 
-```text
-(.venv)
-```
+| Split | Feature file | Label file | Samples |
+| --- | --- | --- | ---: |
+| train | `featuremap_train.npy` | `labels_train.npy` | 24,066 |
+| validation | `featuremap_validate.npy` | `labels_validate.npy` | 8,033 |
+| test | `featuremap_test.npy` | `labels_test.npy` | 7,984 |
 
-You can verify that the virtual environment is active with:
+Features must be `[S,8,8,5]`, labels `[S,57]`. Invalid shapes, counts,
+or NaN/Inf stop with a split/path error. Both arrays become FP32; labels
+stay in metres during optimization.
+
+## Run
 
 ```bash
-which python
-python --version
+python -m unittest discover -s tests -v
+python train.py --mode smoke --steps 25 --batch-size 32 --device cpu
+python train.py --mode train --epochs 1 --batch-size 128 \
+  --device auto --output-dir results/provisional_fp32_v1
+python train.py --mode eval \
+  --checkpoint results/provisional_fp32_v1/best.pt \
+  --split validation --device auto
+# Run test evaluation only after validation checkpoint selection.
+python train.py --mode eval \
+  --checkpoint results/provisional_fp32_v1/best.pt \
+  --split test --device auto
 ```
 
-### 3. Install dependencies
+Each smoke/train output directory must be new, preventing accidental
+overwrite. Smoke repeats one fixed real train batch and saves `smoke.json`
+with initial/final loss and per-block delta diagnostics under separate
+`results/provisional_fp32_v1_smoke/` by default. It does not evaluate
+validation or test. Train shuffles all train samples, evaluates all
+validation samples without shuffling, and never drops the final batch.
+It writes `history.jsonl`, `best.pt` selected by validation mean RMSE,
+and `last.pt` from the last completed epoch. Eval restores architecture
+and readout from checkpoint. Training resume is not implemented.
 
-Upgrade `pip` first:
+Defaults: one epoch, Adam (lr 0.001, betas 0.9/0.999, zero weight decay),
+MSE loss, batch size 128, gradient norm cap 1.0, seed 0, `num_workers=0`,
+mean readout, FP32. These are provisional training choices, not confirmed
+paper settings. `--device auto` chooses CUDA, then MPS, then CPU.
+Unavailable requested devices fail. On CUDA, TF32 is disabled for matmul
+and convolution and the applied API/settings are printed. No AMP,
+quantization, scheduler, or test-based checkpoint selection is used.
 
-```bash
-python -m pip install --upgrade pip
-```
+## Reproduction choices to confirm
 
-Then install the required packages:
+- Patch embedding is row-major, flatten-only, with no learned projection.
+- Each block has a kernel-4 depthwise Conv1d with bias. It selects the
+  causal prefix after padding, has no separate post-Conv SiLU, and uses
+  SiLU on the gate.
+- RangeNorm normalizes over D using the current `clamp_min(eps)` formula.
+  SSM keeps the joined parameter projection, dt_rank=ceil(D/16),
+  `A=-exp(a_log)`, the same delta for `A_bar` and `B_bar`, sequential
+  recurrence, and fresh zero state per forward.
+- OutputHead defaults to mean pooling plus one `Linear(D,57)`.
+  `--readout last` supports a separately trained comparison.
+- **Delta activation:** `post_projection_relu` projects raw low-rank
+  features, then applies ReLU. Earlier code applied ReLU before projection,
+  allowing negative final delta. Nonnegative delta and finite
+  `A=-exp(a_log)` give `A_bar=exp(delta*A)` in [0,1]. This does not
+  guarantee overall training stability. Author placement is unconfirmed.
+- **Delta initialization:** weights use uniform
+  `[-0.001/sqrt(dt_rank), +0.001/sqrt(dt_rank)]`; bias uses
+  `exp(Uniform(log(0.001), log(0.1)))`. These are initialization
+  settings, not a clamp on actual delta, and neither confirmed paper
+  values nor MARS-validated optima.
 
-```bash
-pip install -r requirements.txt
-```
+Checkpoint metadata records baseline ID, architecture/readout, delta
+settings, training settings, parameter data size, Python/PyTorch/NumPy
+versions, device, Git SHA/dirty status, and MARS submodule SHA when
+available. Loading rejects conflicting baseline, readout, or delta
+metadata. Old pre-projection-ReLU checkpoints are not this baseline.
 
-### 4. Verify the environment
+## Metrics and verification
 
-Run the following command:
+MARS X coordinates occupy indices 0:19, Y 19:38, Z 38:57. Evaluation
+accumulates absolute and squared errors for each of 57 coordinates over
+the **whole** split. It computes each coordinate's MAE and RMSE, averages
+19 coordinates per axis and all 57 overall, then converts metres to
+centimetres. It does not take the square root of one global MSE or average
+batch RMSE values.
 
-```bash
-python - <<'PY'
-import torch
-import numpy as np
-
-print("PyTorch:", torch.__version__)
-print("NumPy:", np.__version__)
-print("CUDA available:", torch.cuda.is_available())
-print("MPS available:", torch.backends.mps.is_available())
-PY
-```
-
-On Apple Silicon Macs, `MPS available: True` means PyTorch can use the Apple GPU.
-
-### 5. Verify the MARS dataset loader
-
-Run a simple check:
-
-```bash
-python - <<'PY'
-from datasets.mars import MARSDataset
-
-dataset = MARSDataset(
-    "third_party/MARS/feature/featuremap_train.npy",
-    "third_party/MARS/feature/labels_train.npy",
-)
-
-x, y = dataset[0]
-
-print("Dataset size:", len(dataset))
-print("Input shape:", x.shape)
-print("Input dtype:", x.dtype)
-print("Label shape:", y.shape)
-print("Label dtype:", y.dtype)
-PY
-```
-
-Expected output:
-
-```text
-Dataset size: 24066
-Input shape: torch.Size([8, 8, 5])
-Input dtype: torch.float32
-Label shape: torch.Size([57])
-Label dtype: torch.float32
-```
-
-At this point, the development environment and MARS dataset are ready.
-
-## Status
-
-* [x] MARS dataset loader
-* [x] High-level model structure
-* [ ] eMamba block implementation
-* [ ] Selective SSM implementation
-* [ ] FP32 training
-* [ ] Evaluation
-
-## References
-
-* J. Kim et al., *eMamba: Efficient Acceleration Framework for Mamba Models in Edge Computing*
-* S. An and U. Y. Ogras, *MARS: mmWave-based Assistive Rehabilitation System for Smart Healthcare*
+Paper references: mean MAE **5.66 cm**, mean RMSE **7.85 cm**. On
+2026-09-21, a local CPU run passed unit tests, real-MARS 25-step smoke
+(loss 1.4865 to 1.0603, finite), and one full train/validation epoch.
+That epoch yielded validation mean MAE **12.3355 cm** and mean RMSE
+**16.2922 cm** over 8,033 samples; checkpoint reload gave the same
+validation metrics. A one-step MPS smoke also completed with finite loss.
+These values show the pipeline runs, not paper fidelity. A 150-epoch run,
+test evaluation, CUDA execution, and author detail confirmation remain
+unverified.

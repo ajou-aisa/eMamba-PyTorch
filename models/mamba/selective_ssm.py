@@ -1,5 +1,7 @@
 """Selective SSM boundary from Section 4.3."""
 
+import math
+
 import torch
 from torch import Tensor, nn
 
@@ -9,14 +11,20 @@ class SelectiveSSM(nn.Module):
 
     def __init__(self, d_inner: int, d_state: int, dt_rank: int) -> None:
         super().__init__()
+        if d_inner <= 0 or d_state <= 0 or dt_rank <= 0:
+            raise ValueError("d_inner, d_state, and dt_rank must be positive")
 
         #ED
         self.d_inner = d_inner
         #N
         self.d_state = d_state
 
-        #size of dimension of ReLU
+        # Intermediate low-rank width of the delta projection.
         self.dt_rank = dt_rank
+        self.delta_activation = "post_projection_relu"
+        self.dt_init_min = 1e-3
+        self.dt_init_max = 1e-1
+        self.dt_init_scale = 1e-3
 
         #proj 3 simultaneously to get delta, b, c
         self.ssm_param_proj = nn.Linear(
@@ -31,6 +39,7 @@ class SelectiveSSM(nn.Module):
             d_inner,
             bias=True,
         )
+        self._init_delta_parameters()
 
         # 연속시간 상태 전이 파라미터 A의 초기 크기이다.
         #
@@ -48,8 +57,25 @@ class SelectiveSSM(nn.Module):
         # shape: [ED]
         self.d_skip = nn.Parameter(torch.ones(d_inner))        
 
+    def _init_delta_parameters(self) -> None:
+        bound = self.dt_init_scale / math.sqrt(self.dt_rank)
+        with torch.no_grad():
+            self.delta_proj.weight.uniform_(-bound, bound)
+            bias = torch.empty_like(self.delta_proj.bias).uniform_(
+                math.log(self.dt_init_min), math.log(self.dt_init_max)
+            ).exp_()
+            self.delta_proj.bias.copy_(bias)
+
+    def compute_delta(self, tokens: Tensor) -> Tensor:
+        """Return final delta for transient diagnostics; caller detaches for logging."""
+        delta_features = self.ssm_param_proj(tokens)[..., :self.dt_rank]
+        return torch.relu(self.delta_proj(delta_features))
 
     def forward(self, tokens: Tensor) -> Tensor:
+        if tokens.ndim != 3 or tokens.shape[-1] != self.d_inner:
+            raise ValueError(f"tokens must have shape [B, L, {self.d_inner}]")
+        if tokens.shape[1] == 0:
+            raise ValueError("tokens must have a nonempty sequence")
 
         # token: [B,L,ED]
         batch_size, sequence_length, _ = tokens.shape
@@ -68,10 +94,9 @@ class SelectiveSSM(nn.Module):
             dim=-1,
         )
 
-        #delta_features -> ReLU -> linear projection -> delta
+        # Provisional choice, not a confirmed author detail: ReLU after projection.
         # [B,L,dt_rank] -> [B,L,ED]
-        delta = torch.relu(delta_features)
-        delta = self.delta_proj(delta)
+        delta = torch.relu(self.delta_proj(delta_features))
 
         # A = -exp(A_log)
         # continuous_a = A : [ED,N]

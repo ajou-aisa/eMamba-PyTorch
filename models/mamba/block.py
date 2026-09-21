@@ -11,6 +11,8 @@ class EMambaBlock(nn.Module):
 
     def __init__(self, d_model: int, expand: int, d_state: int) -> None:
         super().__init__()
+        if d_model <= 0 or expand <= 0 or d_state <= 0:
+            raise ValueError("d_model, expand, and d_state must be positive")
         self.d_model = d_model
         self.d_inner = d_model * expand
         self.d_state = d_state
@@ -36,6 +38,11 @@ class EMambaBlock(nn.Module):
         self.output_proj = nn.Linear(self.d_inner, d_model)
 
     def forward(self, tokens: Tensor) -> Tensor:
+        if tokens.ndim != 3 or tokens.shape[-1] != self.d_model:
+            raise ValueError(f"Expected [B, L, {self.d_model}], got {tuple(tokens.shape)}")
+        if tokens.shape[1] == 0:
+            raise ValueError("Token sequence must not be empty")
+
         residual = tokens
         normalized = self.norm(tokens)
 
@@ -59,6 +66,8 @@ class MambaConv1D(nn.Module):
 
     def __init__(self, d_inner: int, d_conv: int = 4) -> None:
         super().__init__()
+        if d_inner <= 0 or d_conv <= 0:
+            raise ValueError("d_inner and d_conv must be positive")
         self.d_inner = d_inner
         self.d_conv = d_conv
 
@@ -72,19 +81,23 @@ class MambaConv1D(nn.Module):
         )
 
     def forward(self, tokens: Tensor) -> Tensor:
+        if tokens.ndim != 3 or tokens.shape[-1] != self.d_inner:
+            raise ValueError(f"Expected [B, L, {self.d_inner}], got {tuple(tokens.shape)}")
+        if tokens.shape[1] == 0:
+            raise ValueError("Token sequence must not be empty")
 
-        # Interface: [B, L, ED] -> [B, L, ED]
         seq_len = tokens.size(1)
 
-        #[B, L, ED] -> [B, ED, L]
+        # [B, L, ED] -> [B, ED, L]
         hidden = tokens.transpose(1, 2).contiguous()
 
-        #[B, ED, L] -> [B, ED, L + d_conv - 1]
+        # [B, ED, L] -> [B, ED, L + d_conv - 1]
         hidden = self.conv1d(hidden)
 
-        hidden = hidden[..., :seq_len].contiguous()
+        # Keep the causal prefix; right padding cannot affect these outputs.
+        hidden = hidden[..., :seq_len]
 
-        #[B, ED, L] -> [B, L, ED]
+        # [B, ED, L] -> [B, L, ED]
         hidden = hidden.transpose(1, 2).contiguous()
-        
+
         return hidden

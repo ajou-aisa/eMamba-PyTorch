@@ -9,6 +9,8 @@ class RangeNorm(nn.Module):
 
     def __init__(self, d_model: int, eps: float = 1e-6) -> None:
         super().__init__()
+        if d_model <= 0 or not eps > 0:
+            raise ValueError("d_model and eps must be positive")
         self.d_model = d_model
         self.eps = eps
 
@@ -17,22 +19,25 @@ class RangeNorm(nn.Module):
         self.beta = nn.Parameter(torch.zeros(d_model))
 
     def forward(self, tokens: Tensor) -> Tensor:
-            # Mean of each token over the feature dimension D.
-            mean = tokens.mean(dim=-1, keepdim=True)
+        if tokens.ndim != 3 or tokens.shape[-1] != self.d_model:
+            raise ValueError(f"Expected [B, L, {self.d_model}], got {tuple(tokens.shape)}")
 
-            # Center the input.
-            centered = tokens - mean
+        # Mean of each token over the feature dimension D.
+        mean = tokens.mean(dim=-1, keepdim=True)
 
-            # Range of each token.
-            x_max = centered.amax(dim=-1, keepdim=True)
-            x_min = centered.amin(dim=-1, keepdim=True)
-            value_range = (x_max - x_min).clamp_min(self.eps)
+        # Center the input.
+        centered = tokens - mean
 
-            # Range normalization.
-            normalized = centered / value_range
+        # Range of each token.
+        x_max = centered.amax(dim=-1, keepdim=True)
+        x_min = centered.amin(dim=-1, keepdim=True)
+        value_range = (x_max - x_min).clamp_min(self.eps)
 
-            # Learnable scale and shift.
-            return self.gamma * normalized + self.beta
+        # Range normalization.
+        normalized = centered / value_range
+
+        # Learnable scale and shift.
+        return self.gamma * normalized + self.beta
 
     def extra_repr(self) -> str:
-        return f"d_model={self.d_model}"
+        return f"d_model={self.d_model}, eps={self.eps}"
