@@ -14,7 +14,11 @@ models/mamba/range_norm.py    range normalization over D
 models/mamba/selective_ssm.py sequential selective recurrence
 models/emamba.py              Patch, two blocks, OutputHead
 models/output_head.py         mean or last readout and one Linear
-train.py                      smoke, FP32 training, validation, eval, checkpoints
+train.py                      CLI, device/data setup, smoke/train/eval control
+training/engine.py            PyTorch train epoch and inference evaluation
+training/metrics.py           MARS CPU FP64 tensor accumulator
+training/checkpoint.py        checkpoint save/load and run metadata
+training/diagnostics.py       smoke-only delta statistics
 tests/                        unit and pipeline checks
 test_conv.py                  original causal Conv check
 third_party/MARS/feature/     public MARS NumPy files from submodule
@@ -55,7 +59,8 @@ stay in metres during optimization.
 
 ```bash
 python -m unittest discover -s tests -v
-python train.py --mode smoke --steps 25 --batch-size 32 --device cpu
+python train.py --mode smoke --steps 25 --batch-size 32 \
+  --device cpu --debug-numerics
 python train.py --mode train --epochs 1 --batch-size 128 \
   --device auto --output-dir results/provisional_fp32_v1
 python train.py --mode eval \
@@ -75,7 +80,15 @@ validation or test. Train shuffles all train samples, evaluates all
 validation samples without shuffling, and never drops the final batch.
 It writes `history.jsonl`, `best.pt` selected by validation mean RMSE,
 and `last.pt` from the last completed epoch. Eval restores architecture
-and readout from checkpoint. Training resume is not implemented.
+and readout from checkpoint. Checkpoints load on CPU before the model moves
+to the requested device. Training resume is not implemented.
+
+Training uses a standard PyTorch loop with a caller-owned MSE criterion,
+backward, finite-norm gradient clipping, and optimizer step. Shape, loss,
+gradient norm, and final validation metric checks always run.
+`--debug-numerics` additionally checks predictions, individual gradients,
+CPU transfer, FP64 conversion, errors, and metric accumulators. Smoke enables
+these detailed checks by default.
 
 Defaults: one epoch, Adam (lr 0.001, betas 0.9/0.999, zero weight decay),
 MSE loss, batch size 128, gradient norm cap 1.0, seed 0, `num_workers=0`,
@@ -117,7 +130,9 @@ metadata. Old pre-projection-ReLU checkpoints are not this baseline.
 ## Metrics and verification
 
 MARS X coordinates occupy indices 0:19, Y 19:38, Z 38:57. Evaluation
-accumulates absolute and squared errors for each of 57 coordinates over
+moves MPS/CUDA predictions to CPU in FP32 first, then converts to CPU FP64;
+the two operations must remain separate. CPU torch.float64 tensors
+accumulate absolute and squared errors for each of 57 coordinates over
 the **whole** split. It computes each coordinate's MAE and RMSE, averages
 19 coordinates per axis and all 57 overall, then converts metres to
 centimetres. It does not take the square root of one global MSE or average
