@@ -1,0 +1,15 @@
+{
+  "include": [
+    "train.py",
+    "datasets",
+    "models",
+    "training",
+    "tests"
+  ],
+  "exclude": [
+    ".venv",
+    "results",
+    "checkpoints",
+    "third_party"
+  ]
+}
