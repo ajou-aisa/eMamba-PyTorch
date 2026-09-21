@@ -69,6 +69,10 @@ class SelectiveSSM(nn.Module):
     def compute_delta(self, tokens: Tensor) -> Tensor:
         """Return final delta for transient diagnostics; caller detaches for logging."""
         delta_features = self.ssm_param_proj(tokens)[..., :self.dt_rank]
+        return self._project_delta(delta_features)
+
+    def _project_delta(self, delta_features: Tensor) -> Tensor:
+        # Provisional choice, not a confirmed author detail: ReLU after projection.
         return torch.relu(self.delta_proj(delta_features))
 
     def forward(self, tokens: Tensor) -> Tensor:
@@ -94,9 +98,8 @@ class SelectiveSSM(nn.Module):
             dim=-1,
         )
 
-        # Provisional choice, not a confirmed author detail: ReLU after projection.
         # [B,L,dt_rank] -> [B,L,ED]
-        delta = torch.relu(self.delta_proj(delta_features))
+        delta = self._project_delta(delta_features)
 
         # A = -exp(A_log)
         # continuous_a = A : [ED,N]
