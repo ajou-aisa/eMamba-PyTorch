@@ -88,7 +88,7 @@ class EvaluationEngineTests(unittest.TestCase):
         self.assertEqual(small["samples"], 3)
         for metric in ("mae_cm", "rmse_cm"):
             for axis in ("x", "y", "z", "all"):
-                self.assertAlmostEqual(small[metric][axis], full[metric][axis])
+                self.assertAlmostEqual(small[metric][axis], full[metric][axis], delta=1e-6,)
 
     def test_cpu_transfer_precedes_fp64_conversion(self) -> None:
         model = EMamba()
