@@ -1,3 +1,4 @@
+import random
 import subprocess
 import sys
 from pathlib import Path
@@ -15,6 +16,66 @@ MODEL_DEFAULTS = {
     "d_state": 8, "out_dim": 57, "in_channels": 5,
 }
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def capture_rng_state() -> dict:
+    numpy_state = np.random.get_state(legacy=True)
+    if isinstance(numpy_state, dict):
+        raise RuntimeError("NumPy legacy RNG state is unavailable")
+    mps_supported = (
+        torch.backends.mps.is_available()
+        and hasattr(torch.mps, "get_rng_state")
+        and hasattr(torch.mps, "set_rng_state")
+    )
+    return {
+        "python": random.getstate(),
+        "numpy": (
+            numpy_state[0], numpy_state[1].tolist(), numpy_state[2],
+            numpy_state[3], numpy_state[4],
+        ),
+        "torch": torch.get_rng_state(),
+        "cuda": torch.cuda.get_rng_state_all() if torch.cuda.is_available() else None,
+        "mps": torch.mps.get_rng_state() if mps_supported else None,
+        "device_rng_support": {
+            "cuda": torch.cuda.is_available(), "mps": mps_supported,
+        },
+    }
+
+
+def restore_rng_state(state: dict, device: torch.device) -> None:
+    if not isinstance(state, dict) or not all(
+        key in state for key in ("python", "numpy", "torch", "device_rng_support")
+    ):
+        raise ValueError("checkpoint RNG state is missing or incomplete")
+    numpy_state = state["numpy"]
+    random.setstate(state["python"])
+    np.random.set_state((
+        numpy_state[0], np.asarray(numpy_state[1], dtype=np.uint32),
+        numpy_state[2], numpy_state[3], numpy_state[4],
+    ))
+    torch.set_rng_state(state["torch"])
+    if device.type == "cuda" and state.get("cuda") is not None:
+        torch.cuda.set_rng_state_all(state["cuda"])
+    if device.type == "mps" and state.get("mps") is not None:
+        torch.mps.set_rng_state(state["mps"])
+
+
+def restore_optimizer_state(
+    optimizer: torch.optim.Optimizer, payload: dict, device: torch.device,
+) -> None:
+    state_dict = payload.get("optimizer_state_dict")
+    if (not isinstance(state_dict, dict)
+            or not isinstance(state_dict.get("state"), dict)
+            or not isinstance(state_dict.get("param_groups"), list)):
+        raise ValueError("checkpoint optimizer state is missing or invalid")
+    try:
+        optimizer.load_state_dict(state_dict)
+    except (KeyError, TypeError, ValueError) as error:
+        raise ValueError("checkpoint optimizer state is invalid") from error
+    for state in optimizer.state.values():
+        for key, value in state.items():
+            if isinstance(value, torch.Tensor):
+                state[key] = value.to(device)
 
 
 def delta_configuration(model: EMamba) -> dict[str, str | float]:
@@ -48,6 +109,7 @@ def save_checkpoint(
     path: Path, model: EMamba, optimizer: torch.optim.Optimizer,
     epoch: int, global_step: int, best_rmse_cm: float,
     model_config: dict, training_config: dict, device: torch.device,
+    *, rng_state: dict | None = None,
 ) -> None:
     parameter_count, parameter_bytes = parameter_size(model)
     git_status = git_value("status", "--porcelain")
@@ -72,6 +134,8 @@ def save_checkpoint(
             "mars_commit": git_value("-C", "third_party/MARS", "rev-parse", "HEAD"),
         },
     }
+    if rng_state is not None:
+        payload["rng_state"] = rng_state
     temporary = path.with_name(path.stem + ".tmp" + path.suffix)
     torch.save(payload, temporary)
     temporary.replace(path)

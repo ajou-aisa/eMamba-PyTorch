@@ -8,6 +8,7 @@ from training.reporting import (
     print_epoch_result,
     print_eval_summary,
     print_run_summary,
+    print_resume_summary,
     print_smoke_summary,
     print_training_summary,
 )
@@ -103,6 +104,19 @@ class ReportingTests(unittest.TestCase):
             self.assertIn(value, eval_output)
         for axis in ("X", "Y", "Z"):
             self.assertIn(axis, eval_output)
+
+    def test_resume_summary_shows_continuation_and_device_change(self) -> None:
+        payload = {
+            "epoch": 20, "global_step": 3780,
+            "best_validation_rmse_cm": 10.8999,
+            "environment": {"device": "mps"},
+        }
+        output = self.capture(
+            print_resume_summary, Path("results/run/last.pt"), payload, 150, "cuda",
+        )
+        for value in ("Resume", "Completed epoch  20", "Next epoch       21",
+                      "Target epoch     150", "3,780", "10.900 cm", "cuda (from mps)"):
+            self.assertIn(value, output)
 
 
 if __name__ == "__main__":

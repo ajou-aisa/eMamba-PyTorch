@@ -79,6 +79,22 @@ def print_training_summary(
     print(RULE)
 
 
+def print_resume_summary(
+    checkpoint: Path, payload: dict, target_epoch: int, device: str,
+) -> None:
+    completed = payload["epoch"]
+    print("eMamba FP32 Training — Resume")
+    print(RULE)
+    print(f"{'Checkpoint':<17}{checkpoint}")
+    print(f"{'Completed epoch':<17}{completed}")
+    print(f"{'Next epoch':<17}{completed + 1}")
+    print(f"{'Target epoch':<17}{target_epoch}")
+    print(f"{'Global step':<17}{payload['global_step']:,}")
+    print(f"{'Best RMSE':<17}{payload['best_validation_rmse_cm']:.3f} cm")
+    print(f"{'Device':<17}{device} (from {payload['environment']['device']})")
+    print(RULE)
+
+
 def print_smoke_summary(config: dict, result: dict) -> None:
     print("eMamba Smoke Test")
     print(RULE)

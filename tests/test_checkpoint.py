@@ -1,16 +1,21 @@
+import random
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+import numpy as np
 import torch
 
 from models.emamba import EMamba
 from training.checkpoint import (
     BASELINE_ID,
     MODEL_DEFAULTS,
+    capture_rng_state,
     load_checkpoint,
     parameter_size,
+    restore_optimizer_state,
+    restore_rng_state,
     save_checkpoint,
 )
 
@@ -99,6 +104,92 @@ class CheckpointTests(unittest.TestCase):
                     torch.save(payload, path)
                     with self.assertRaisesRegex(ValueError, message):
                         load_checkpoint(path, torch.device("cpu"))
+
+    def test_rng_state_roundtrip_is_weights_only_safe(self) -> None:
+        original_python = random.getstate()
+        original_numpy = np.random.get_state()
+        original_torch = torch.get_rng_state()
+        try:
+            random.seed(29)
+            np.random.seed(29)
+            torch.manual_seed(29)
+            with tempfile.TemporaryDirectory() as directory:
+                path = Path(directory) / "last.pt"
+                save_checkpoint(
+                    path, self.model, self.optimizer, 1, 2, 1.0,
+                    self.model_config, {"seed": 29}, torch.device("cpu"),
+                    rng_state=capture_rng_state(),
+                )
+                expected = (random.random(), np.random.random(), torch.rand(4))
+                payload = torch.load(path, map_location="cpu", weights_only=True)
+                restore_rng_state(payload["rng_state"], torch.device("cpu"))
+                actual = (random.random(), np.random.random(), torch.rand(4))
+            self.assertEqual(expected[0], actual[0])
+            self.assertEqual(expected[1], actual[1])
+            torch.testing.assert_close(expected[2], actual[2], rtol=0, atol=0)
+            self.assertIn("device_rng_support", payload["rng_state"])
+        finally:
+            random.setstate(original_python)
+            np.random.set_state(original_numpy)
+            torch.set_rng_state(original_torch)
+
+    def test_optimizer_state_roundtrip_on_cpu(self) -> None:
+        frames = torch.randn(2, 8, 8, 5)
+        self.optimizer.zero_grad(set_to_none=True)
+        self.model(frames).square().mean().backward()
+        self.optimizer.step()
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "last.pt"
+            self.save(path)
+            restored_model, payload = load_checkpoint(path, torch.device("cpu"))
+            restored_optimizer = torch.optim.Adam(restored_model.parameters())
+            restore_optimizer_state(restored_optimizer, payload, torch.device("cpu"))
+
+        for original, restored in zip(self.model.parameters(), restored_model.parameters()):
+            torch.testing.assert_close(original, restored, rtol=0, atol=0)
+            original_state = self.optimizer.state[original]
+            restored_state = restored_optimizer.state[restored]
+            for key in ("step", "exp_avg", "exp_avg_sq"):
+                self.assertEqual(restored_state[key].device.type, "cpu")
+                torch.testing.assert_close(original_state[key], restored_state[key], rtol=0, atol=0)
+
+    def test_optimizer_state_requires_valid_payload(self) -> None:
+        with self.assertRaisesRegex(ValueError, "optimizer state"):
+            restore_optimizer_state(self.optimizer, {}, torch.device("cpu"))
+        with self.assertRaisesRegex(ValueError, "optimizer state"):
+            restore_optimizer_state(
+                self.optimizer, {"optimizer_state_dict": {"state": {}}}, torch.device("cpu"),
+            )
+
+    @unittest.skipUnless(torch.backends.mps.is_available(), "MPS unavailable")
+    def test_rng_state_restores_mps_next_draw(self) -> None:
+        original = capture_rng_state()
+        try:
+            torch.mps.manual_seed(29)
+            state = capture_rng_state()
+            expected = torch.rand(4, device="mps").cpu()
+            restore_rng_state(state, torch.device("mps"))
+            actual = torch.rand(4, device="mps").cpu()
+            torch.testing.assert_close(expected, actual, rtol=0, atol=0)
+        finally:
+            restore_rng_state(original, torch.device("mps"))
+
+    @unittest.skipUnless(torch.backends.mps.is_available(), "MPS unavailable")
+    def test_optimizer_state_moves_to_mps(self) -> None:
+        frames = torch.randn(2, 8, 8, 5)
+        self.optimizer.zero_grad(set_to_none=True)
+        self.model(frames).square().mean().backward()
+        self.optimizer.step()
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "last.pt"
+            self.save(path)
+            restored_model, payload = load_checkpoint(path, torch.device("mps"))
+            restored_optimizer = torch.optim.Adam(restored_model.parameters())
+            restore_optimizer_state(restored_optimizer, payload, torch.device("mps"))
+        for state in restored_optimizer.state.values():
+            for value in state.values():
+                if isinstance(value, torch.Tensor):
+                    self.assertEqual(value.device.type, "mps")
 
 
 if __name__ == "__main__":

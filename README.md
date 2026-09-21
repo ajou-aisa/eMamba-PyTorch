@@ -90,7 +90,33 @@ It writes `run_config.json` with the full start configuration,
 by validation mean RMSE,
 and `last.pt` from the last completed epoch. Eval restores architecture
 and readout from checkpoint. Checkpoints load on CPU before the model moves
-to the requested device. Training resume is not implemented.
+to the requested device.
+
+## Resume training
+
+```bash
+python train.py --mode train \
+  --resume results/provisional_fp32_v1/last.pt \
+  --epochs 150 --device cuda
+```
+
+`--epochs` is the final target epoch: a checkpoint at epoch 20 runs epochs
+21 through 150. Resume accepts only `last.pt`, reuses its parent output
+directory, and appends to `history.jsonl`. An explicit `--output-dir` must
+name that same directory. Model, Adam state, global step, saved best RMSE,
+batch size, learning rate, seed, and other training settings come from the
+checkpoint; CLI hyperparameter overrides are rejected. The existing
+`run_config.json` is checked and preserved. Device changes are allowed,
+but FP32 remains required. Resume starts at the next **whole epoch**;
+mid-epoch batches are not restored.
+
+New checkpoints include Python, NumPy, Torch, and available CUDA/MPS RNG
+state. The current train DataLoader uses Torch's global RNG for shuffling,
+so restoring that state preserves its order. Older checkpoints without
+RNG state remain usable for evaluation and may resume with a prominent
+warning; their continuation cannot be bitwise identical to an uninterrupted
+run. Cross-device continuation is supported, though backend arithmetic and
+unavailable target-device RNG state can also prevent bitwise equivalence.
 
 Training uses a standard PyTorch loop with a caller-owned MSE criterion,
 backward, finite-norm gradient clipping, and optimizer step. Shape, loss,

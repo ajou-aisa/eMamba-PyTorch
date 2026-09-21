@@ -43,6 +43,7 @@ class TrainingEntryTests(unittest.TestCase):
                     batch_size=128, num_workers=0, data_root=root,
                     output_dir=root / "run", epochs=1, steps=None,
                     debug_numerics=False, no_progress=True, json_stdout=json_stdout,
+                    resume=None,
                 )
                 output = io.StringIO()
                 with (
@@ -84,6 +85,7 @@ class TrainingEntryTests(unittest.TestCase):
                 batch_size=128, num_workers=0, data_root=root,
                 output_dir=root / "run", epochs=2, steps=None,
                 debug_numerics=False, no_progress=True, json_stdout=False,
+                resume=None,
             )
             validations = [
                 {"mae_cm": {"all": 7.0}, "rmse_cm": {"all": 12.0}},
@@ -120,6 +122,7 @@ class TrainingEntryTests(unittest.TestCase):
                 batch_size=2, num_workers=0, data_root=root,
                 output_dir=root / "run", epochs=2, steps=None,
                 debug_numerics=False, no_progress=True, json_stdout=False,
+                resume=None,
             )
             invalid = {"rmse_cm": {"all": float("nan")}}
             with (
