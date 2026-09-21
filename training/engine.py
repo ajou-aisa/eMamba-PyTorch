@@ -4,6 +4,7 @@ import torch
 from torch import Tensor, nn
 from torch.nn.utils import clip_grad_norm_
 from torch.utils.data import DataLoader
+from tqdm import tqdm
 
 from .checkpoint import BASELINE_ID
 from .metrics import MARSMetricAccumulator
@@ -22,11 +23,17 @@ def train_one_epoch(
     global_step: int,
     *,
     debug_numerics: bool = False,
+    show_progress: bool = False,
+    progress_desc: str | None = None,
 ) -> tuple[float, int]:
     model.train()
     loss_sum = 0.0
     elements = 0
-    for batch_index, (features, target) in enumerate(loader, start=1):
+    batches = tqdm(
+        loader, desc=progress_desc or f"Epoch {epoch}",
+        leave=False, dynamic_ncols=True, disable=not show_progress,
+    )
+    for batch_index, (features, target) in enumerate(batches, start=1):
         features = features.to(device)
         target = target.to(device)
         optimizer.zero_grad(set_to_none=True)
@@ -50,9 +57,12 @@ def train_one_epoch(
         except RuntimeError as error:
             raise FloatingPointError(f"{location} gradient norm is nonfinite") from error
         optimizer.step()
-        loss_sum += loss.item() * target.numel()
+        batch_loss = loss.item()
+        loss_sum += batch_loss * target.numel()
         elements += target.numel()
         global_step += 1
+        if show_progress:
+            batches.set_postfix(loss=f"{batch_loss:.5f}")
     if elements == 0:
         raise ValueError(f"epoch={epoch} has no training samples")
     return loss_sum / elements, global_step
@@ -67,10 +77,16 @@ def evaluate(
     checkpoint: str,
     *,
     debug_numerics: bool = False,
+    show_progress: bool = False,
+    progress_desc: str | None = None,
 ) -> dict:
     model.eval()
     metrics = MARSMetricAccumulator()
-    for batch_index, (features, target) in enumerate(loader, start=1):
+    batches = tqdm(
+        loader, desc=progress_desc or split.capitalize(),
+        leave=False, dynamic_ncols=True, disable=not show_progress,
+    )
+    for batch_index, (features, target) in enumerate(batches, start=1):
         prediction = model(features.to(device))
         if prediction.shape != target.shape:
             raise ValueError(f"{split} batch={batch_index}: prediction shape mismatch")

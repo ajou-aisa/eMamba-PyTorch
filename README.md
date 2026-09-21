@@ -19,6 +19,7 @@ training/engine.py            PyTorch train epoch and inference evaluation
 training/metrics.py           MARS CPU FP64 tensor accumulator
 training/checkpoint.py        checkpoint save/load and run metadata
 training/diagnostics.py       smoke-only delta statistics
+training/reporting.py         human-readable terminal summaries
 tests/                        unit and pipeline checks
 test_conv.py                  original causal Conv check
 third_party/MARS/feature/     public MARS NumPy files from submodule
@@ -72,13 +73,21 @@ python train.py --mode eval \
   --split test --device auto
 ```
 
+Terminal output defaults to a compact run summary, one row per epoch,
+and a final best-checkpoint summary. Train and validation batch bars use
+`tqdm` only when stderr is a terminal. `--no-progress` disables them;
+`--json-stdout` restores the previous machine-readable JSON lines and
+also disables bars. The latter works for smoke, train, and eval.
+
 Each smoke/train output directory must be new, preventing accidental
 overwrite. Smoke repeats one fixed real train batch and saves `smoke.json`
 with initial/final loss and per-block delta diagnostics under separate
 `results/provisional_fp32_v1_smoke/` by default. It does not evaluate
 validation or test. Train shuffles all train samples, evaluates all
 validation samples without shuffling, and never drops the final batch.
-It writes `history.jsonl`, `best.pt` selected by validation mean RMSE,
+It writes `run_config.json` with the full start configuration,
+`history.jsonl` with unchanged per-epoch raw metrics, `best.pt` selected
+by validation mean RMSE,
 and `last.pt` from the last completed epoch. Eval restores architecture
 and readout from checkpoint. Checkpoints load on CPU before the model moves
 to the requested device. Training resume is not implemented.

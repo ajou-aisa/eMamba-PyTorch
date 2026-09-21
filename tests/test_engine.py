@@ -1,3 +1,5 @@
+import contextlib
+import io
 import unittest
 from unittest.mock import patch
 
@@ -10,6 +12,21 @@ from training.engine import evaluate, train_one_epoch
 
 
 class TrainingEngineTests(unittest.TestCase):
+    def test_progress_reports_batch_loss(self) -> None:
+        model = nn.Linear(1, 1)
+        loader = DataLoader(TensorDataset(torch.ones(2, 1), torch.zeros(2, 1)))
+        optimizer = torch.optim.SGD(model.parameters(), lr=0)
+        output = io.StringIO()
+        with contextlib.redirect_stderr(output):
+            loss, steps = train_one_epoch(
+                model, loader, nn.MSELoss(), optimizer, torch.device("cpu"), 1, 0,
+                show_progress=True, progress_desc="Epoch 1/1",
+            )
+        self.assertEqual(steps, 2)
+        self.assertTrue(torch.isfinite(torch.tensor(loss)))
+        self.assertIn("Epoch 1/1", output.getvalue())
+        self.assertIn("loss=", output.getvalue())
+
     def test_criterion_and_small_last_batch_are_weighted(self) -> None:
         model = nn.Linear(1, 1, bias=False)
         with torch.no_grad():

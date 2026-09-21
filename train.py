@@ -2,6 +2,7 @@ import argparse
 import json
 import math
 import random
+import sys
 from pathlib import Path
 
 import numpy as np
@@ -17,6 +18,10 @@ from training.checkpoint import (
 )
 from training.diagnostics import diagnose_delta
 from training.engine import GRADIENT_CLIP, evaluate, train_one_epoch
+from training.reporting import (
+    print_epoch_header, print_epoch_result, print_eval_summary,
+    print_run_summary, print_smoke_summary, print_training_summary,
+)
 
 
 ROOT = Path(__file__).resolve().parent
@@ -38,6 +43,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--readout", choices=("mean", "last"))
     parser.add_argument("--num-workers", type=int, default=0)
     parser.add_argument("--debug-numerics", action="store_true")
+    parser.add_argument("--no-progress", action="store_true")
+    parser.add_argument("--json-stdout", action="store_true")
     parser.add_argument("--checkpoint", type=Path)
     parser.add_argument("--split", choices=("validation", "test"))
     args = parser.parse_args()
@@ -135,6 +142,7 @@ def main() -> None:
     args = parse_args()
     device = select_device(args.device)
     precision = configure_fp32(device)
+    show_progress = not args.no_progress and not args.json_stdout and sys.stderr.isatty()
     if args.mode == "eval":
         model, _ = load_checkpoint(args.checkpoint, device)
         loaders = build_dataloaders(
@@ -143,9 +151,13 @@ def main() -> None:
         result = evaluate(
             model, loaders[args.split], device, args.split, str(args.checkpoint),
             debug_numerics=args.debug_numerics,
+            show_progress=show_progress, progress_desc="Validate",
         )
-        print(json.dumps({"mode": "eval", "precision": precision, **result},
-                         sort_keys=True, allow_nan=False))
+        if args.json_stdout:
+            print(json.dumps({"mode": "eval", "precision": precision, **result},
+                             sort_keys=True, allow_nan=False))
+        else:
+            print_eval_summary(result, str(device))
         return
 
     set_seed(args.seed)
@@ -169,13 +181,21 @@ def main() -> None:
         "tf32": precision,
     }
     args.output_dir.mkdir(parents=True, exist_ok=False)
-    print(json.dumps({
+    run_config = {
         "mode": args.mode, "baseline_id": BASELINE_ID, "device": str(device),
         "precision": precision, "model_config": model_config,
         "delta_config": delta_configuration(model),
         "parameter_count": parameter_count, "fp32_parameter_bytes": parameter_bytes,
         "training_config": training_config,
-    }, sort_keys=True, allow_nan=False))
+    }
+    (args.output_dir / "run_config.json").write_text(
+        json.dumps(run_config, indent=2, sort_keys=True, allow_nan=False) + "\n"
+    )
+    if args.json_stdout:
+        print(json.dumps(run_config, sort_keys=True, allow_nan=False))
+    elif args.mode == "train":
+        sample_counts = {split: SPLIT_SIZES[split] for split in splits}
+        print_run_summary(run_config, args.output_dir, sample_counts)
 
     if args.mode == "smoke":
         fixed_batch = next(iter(loaders["train"]))
@@ -205,26 +225,40 @@ def main() -> None:
         (args.output_dir / "smoke.json").write_text(
             json.dumps(result, indent=2, allow_nan=False) + "\n"
         )
-        print(json.dumps(result, sort_keys=True, allow_nan=False))
+        if args.json_stdout:
+            print(json.dumps(result, sort_keys=True, allow_nan=False))
+        else:
+            print_smoke_summary(run_config, result)
         return
 
     best_rmse_cm = float("inf")
+    best_epoch = 0
+    best_validation = None
+    last_validation = None
     global_step = 0
     history_path = args.output_dir / "history.jsonl"
+    if not args.json_stdout:
+        print_epoch_header()
     for epoch in range(1, args.epochs + 1):
         train_loss, global_step = train_one_epoch(
             model, loaders["train"], criterion, optimizer, device, epoch, global_step,
             debug_numerics=args.debug_numerics,
+            show_progress=show_progress, progress_desc=f"Epoch {epoch}/{args.epochs}",
         )
         validation = evaluate(
             model, loaders["validation"], device, "validation", "current",
             debug_numerics=args.debug_numerics,
+            show_progress=show_progress, progress_desc="Validate",
         )
+        last_validation = validation
         current_rmse_cm = validation["rmse_cm"]["all"]
         if not math.isfinite(current_rmse_cm):
             raise FloatingPointError(f"validation epoch={epoch}: mean RMSE is nonfinite")
-        if current_rmse_cm < best_rmse_cm:
+        is_best = current_rmse_cm < best_rmse_cm
+        if is_best:
             best_rmse_cm = current_rmse_cm
+            best_epoch = epoch
+            best_validation = validation
             save_checkpoint(
                 args.output_dir / "best.pt", model, optimizer, epoch, global_step,
                 best_rmse_cm, model_config, training_config, device,
@@ -237,7 +271,18 @@ def main() -> None:
                   "validation": validation, "best_validation_rmse_cm": best_rmse_cm}
         with history_path.open("a") as history:
             history.write(json.dumps(record, allow_nan=False) + "\n")
-        print(json.dumps(record, sort_keys=True, allow_nan=False))
+        if args.json_stdout:
+            print(json.dumps(record, sort_keys=True, allow_nan=False))
+        else:
+            print_epoch_result(
+                epoch, args.epochs, train_loss, validation, best_rmse_cm, is_best,
+                show_axis_metrics=args.debug_numerics,
+            )
+    if not args.json_stdout:
+        assert best_validation is not None and last_validation is not None
+        print_training_summary(
+            best_epoch, best_validation, last_validation, args.output_dir / "best.pt",
+        )
 
 
 if __name__ == "__main__":
