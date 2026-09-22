@@ -167,7 +167,7 @@ class TrainingEntryTests(unittest.TestCase):
                 np.save(root / f"labels_{suffix}.npy", labels)
                 offset += count
 
-            expected = {"train": 25652, "validation": 6414, "test": 8017}
+            expected = {"train": 25679, "validation": 6420, "test": 7984}
             rng_before = torch.get_rng_state()
             loaders = train.build_dataloaders(root, tuple(expected), 128, 0)
             self.assertEqual(train.SPLIT_SIZES, expected)
@@ -181,10 +181,15 @@ class TrainingEntryTests(unittest.TestCase):
                 memberships[split] = set(ids_seen)
                 self.assertEqual(len(ids_seen), expected[split])
                 self.assertEqual(len(memberships[split]), expected[split])
+                if split == "test":
+                    self.assertEqual(ids_seen, list(range(32099, 40083)))
             self.assertFalse(memberships["train"] & memberships["validation"])
             self.assertFalse(memberships["train"] & memberships["test"])
             self.assertFalse(memberships["validation"] & memberships["test"])
             self.assertEqual(set.union(*memberships.values()), set(range(40083)))
+            self.assertEqual(
+                memberships["train"] | memberships["validation"], set(range(32099)),
+            )
 
             torch.manual_seed(987)
             repeated = train.build_dataloaders(root, ("validation", "test"), 128, 0)

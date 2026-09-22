@@ -32,7 +32,7 @@ from training.resume import validate_resume_files, validate_training_config
 ROOT = Path(__file__).resolve().parent
 SPLIT_FILES = {"train": "train", "validation": "validate", "test": "test"}
 SOURCE_SIZES: Final = {"train": 24066, "validation": 8033, "test": 7984}
-SPLIT_SIZES: Final = {"train": 25652, "validation": 6414, "test": 8017}
+SPLIT_SIZES: Final = {"train": 25679, "validation": 6420, "test": 7984}
 
 
 def parse_args() -> argparse.Namespace:
@@ -147,7 +147,7 @@ def set_seed(seed: int) -> None:
 def build_dataloaders(
     data_root: Path, splits: tuple[str, ...], batch_size: int, num_workers: int,
 ) -> dict[str, DataLoader]:
-    sources = []
+    sources: dict[str, MARSDataset] = {}
     for split, suffix in SPLIT_FILES.items():
         features = data_root / f"featuremap_{suffix}.npy"
         labels = data_root / f"labels_{suffix}.npy"
@@ -157,12 +157,13 @@ def build_dataloaders(
                 f"{split} at {data_root}: expected {SOURCE_SIZES[split]} samples, "
                 f"got {len(dataset)}"
             )
-        sources.append(dataset)
+        sources[split] = dataset
     partitions = random_split(
-        ConcatDataset(sources), list(SPLIT_SIZES.values()),
+        ConcatDataset([sources["train"], sources["validation"]]),
+        [SPLIT_SIZES["train"], SPLIT_SIZES["validation"]],
         generator=torch.Generator().manual_seed(0),
     )
-    datasets = dict(zip(SPLIT_SIZES, partitions, strict=True))
+    datasets = {"train": partitions[0], "validation": partitions[1], "test": sources["test"]}
     loaders = {}
     for split in splits:
         loaders[split] = DataLoader(
