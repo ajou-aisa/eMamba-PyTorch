@@ -82,7 +82,7 @@ class OutputHeadTests(unittest.TestCase):
 
     def test_mlp_parameter_count(self) -> None:
         self.assertEqual(sum(p.numel() for p in OutputHead(20, 57).parameters()), 7617)
-        self.assertEqual(sum(p.numel() for p in EMamba().parameters()), 15497)
+        self.assertEqual(sum(p.numel() for p in EMamba().parameters()), 15297)
 
     def test_rejects_invalid_input_and_has_finite_backward(self) -> None:
         head = OutputHead(2, 3, num_tokens=4)

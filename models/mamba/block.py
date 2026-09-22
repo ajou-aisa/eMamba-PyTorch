@@ -23,11 +23,11 @@ class EMambaBlock(nn.Module):
         self.norm = RangeNorm(d_model)
 
         # Upper path: projection -> SiLU.
-        self.gate_proj = nn.Linear(d_model, self.d_inner)
+        self.gate_proj = nn.Linear(d_model, self.d_inner, bias=False)
         self.gate_act = nn.SiLU()
 
         # Lower path: projection -> convolution -> SSM.
-        self.input_proj = nn.Linear(d_model, self.d_inner)
+        self.input_proj = nn.Linear(d_model, self.d_inner, bias=False)
         self.conv = MambaConv1D(self.d_inner)
         self.ssm = SelectiveSSM(
             d_inner=self.d_inner,
@@ -35,7 +35,7 @@ class EMambaBlock(nn.Module):
             dt_rank=self.dt_rank,
         )
 
-        self.output_proj = nn.Linear(self.d_inner, d_model)
+        self.output_proj = nn.Linear(self.d_inner, d_model, bias=False)
 
     def forward(self, tokens: Tensor) -> Tensor:
         if tokens.ndim != 3 or tokens.shape[-1] != self.d_model:

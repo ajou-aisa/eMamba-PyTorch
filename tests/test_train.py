@@ -66,7 +66,7 @@ class TrainingEntryTests(unittest.TestCase):
                 history = json.loads((root / "run/history.jsonl").read_text(),
                                      parse_constant=reject)
                 self.assertEqual(config["baseline_id"], "provisional_fp32_v2_flatten")
-                self.assertEqual(config["parameter_count"], 15497)
+                self.assertEqual(config["parameter_count"], 15297)
                 self.assertEqual(config["training_config"]["optimizer"], "AdamW")
                 self.assertEqual(config["training_config"]["weight_decay"], 0.01)
                 self.assertEqual(history["validation"], validation)
