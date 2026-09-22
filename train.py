@@ -46,7 +46,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--batch-size", type=int)
     parser.add_argument("--lr", type=float)
     parser.add_argument("--seed", type=int)
-    parser.add_argument("--readout", choices=("mean", "last"))
+    parser.add_argument("--readout", choices=("flatten",))
     parser.add_argument("--num-workers", type=int)
     parser.add_argument("--debug-numerics", action="store_true")
     parser.add_argument("--no-progress", action="store_true")
@@ -84,12 +84,12 @@ def parse_args() -> argparse.Namespace:
             if args.epochs is not None or args.checkpoint or args.split:
                 parser.error("smoke does not use --epochs, --checkpoint, or --split")
             args.steps = 25 if args.steps is None else args.steps
-            args.output_dir = args.output_dir or ROOT / "results/provisional_fp32_v1_smoke"
+            args.output_dir = args.output_dir or ROOT / "results" / f"{BASELINE_ID}_smoke"
         case "train":
             if args.steps is not None or args.checkpoint or args.split:
                 parser.error("train does not use --steps, --checkpoint, or --split")
             args.epochs = 1 if args.epochs is None else args.epochs
-            args.output_dir = args.output_dir or ROOT / "results/provisional_fp32_v1"
+            args.output_dir = args.output_dir or ROOT / "results" / BASELINE_ID
         case "eval":
             if args.checkpoint is None:
                 parser.error("eval requires --checkpoint")
@@ -101,7 +101,7 @@ def parse_args() -> argparse.Namespace:
         if args.resume is None:
             args.lr = 1e-3 if args.lr is None else args.lr
             args.seed = 0 if args.seed is None else args.seed
-            args.readout = args.readout or "mean"
+            args.readout = args.readout or "flatten"
     if args.resume is None:
         args.batch_size = 128 if args.batch_size is None else args.batch_size
         args.num_workers = 0 if args.num_workers is None else args.num_workers

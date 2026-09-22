@@ -65,26 +65,36 @@ class RangeNormTests(unittest.TestCase):
 
 
 class OutputHeadTests(unittest.TestCase):
-    def test_mean_and_last_readout(self) -> None:
-        tokens = torch.tensor([[[1.0, 3.0], [5.0, 7.0]]])
-        mean = OutputHead(2, 1, "mean")
-        last = OutputHead(2, 1, "last")
+    def test_flatten_preserves_token_order_and_applies_relu(self) -> None:
+        tokens = torch.tensor([[[1.0, 3.0], [5.0, 7.0]],
+                               [[2.0, 4.0], [6.0, 8.0]]])
+        head = OutputHead(2, 1, num_tokens=2)
         with torch.no_grad():
-            for head in (mean, last):
-                head.proj.weight.fill_(1.0)
-                head.proj.bias.zero_()
+            head.proj[0].weight.copy_(torch.tensor([[1., 2., 3., 4.],
+                                                   [0., 0., 0., 0.]]))
+            head.proj[0].bias.zero_()
+            head.proj[2].weight.fill_(1.0)
+            head.proj[2].bias.zero_()
 
-        torch.testing.assert_close(mean(tokens), torch.tensor([[8.0]]))
-        torch.testing.assert_close(last(tokens), torch.tensor([[12.0]]))
+        torch.testing.assert_close(head(tokens), torch.tensor([[50.0], [60.0]]))
+        torch.testing.assert_close(head(tokens.flip(1)), torch.tensor([[34.0], [44.0]]))
+        torch.testing.assert_close(head(-tokens), torch.zeros(2, 1))
+
+    def test_mlp_parameter_count(self) -> None:
+        self.assertEqual(sum(p.numel() for p in OutputHead(20, 57).parameters()), 7617)
+        self.assertEqual(sum(p.numel() for p in EMamba().parameters()), 15497)
 
     def test_rejects_invalid_input_and_has_finite_backward(self) -> None:
-        head = OutputHead(2, 3)
+        head = OutputHead(2, 3, num_tokens=4)
         for tokens in (torch.zeros(2, 2), torch.zeros(2, 0, 2),
-                       torch.zeros(2, 4, 3)):
+                       torch.zeros(2, 4, 3), torch.zeros(2, 3, 2)):
             with self.subTest(shape=tuple(tokens.shape)), self.assertRaises(ValueError):
                 head(tokens)
+        for readout in ("mean", "last", "invalid"):
+            with self.subTest(readout=readout), self.assertRaises(ValueError):
+                OutputHead(2, 3, readout)
         with self.assertRaises(ValueError):
-            OutputHead(2, 3, "invalid")
+            OutputHead(2, 3, num_tokens=0)
 
         tokens = torch.randn(2, 4, 2, requires_grad=True)
         head(tokens).square().mean().backward()
@@ -108,13 +118,11 @@ class EMambaTests(unittest.TestCase):
             with self.subTest(shape=tuple(tokens.shape)), self.assertRaises(ValueError):
                 block(tokens)
 
-    def test_default_and_last_readout_shapes(self) -> None:
+    def test_default_flatten_readout_shape(self) -> None:
         frames = torch.randn(2, 8, 8, 5)
-        for readout in ("mean", "last"):
-            with self.subTest(readout=readout):
-                model = EMamba(readout=readout)
-                self.assertEqual(model.head.readout, readout)
-                self.assertEqual(tuple(model(frames).shape), (2, 57))
+        model = EMamba()
+        self.assertEqual(model.head.readout, "flatten")
+        self.assertEqual(tuple(model(frames).shape), (2, 57))
 
     def test_full_model_backward_and_state_dict_roundtrip(self) -> None:
         torch.manual_seed(0)

@@ -22,7 +22,7 @@ from training.checkpoint import (
 
 class CheckpointTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.model_config = {**MODEL_DEFAULTS, "readout": "last"}
+        self.model_config = {**MODEL_DEFAULTS, "readout": "flatten"}
         self.model = EMamba(**self.model_config)
         self.optimizer = torch.optim.Adam(self.model.parameters())
 
@@ -41,7 +41,7 @@ class CheckpointTests(unittest.TestCase):
 
         torch.testing.assert_close(restored(frames), self.model(frames))
         self.assertEqual(payload["baseline_id"], BASELINE_ID)
-        self.assertEqual(payload["readout"], "last")
+        self.assertEqual(payload["readout"], "flatten")
         self.assertEqual(payload["parameter_count"], parameter_size(self.model)[0])
         self.assertEqual(payload["fp32_parameter_bytes"], parameter_size(self.model)[1])
         self.assertIn("optimizer_state_dict", payload)
@@ -84,10 +84,11 @@ class CheckpointTests(unittest.TestCase):
             restored, loaded = load_checkpoint(path, torch.device("cpu"))
 
         self.assertEqual(loaded["best_validation_rmse_cm"], float("inf"))
-        self.assertEqual(restored.head.readout, "last")
+        self.assertEqual(restored.head.readout, "flatten")
 
     def test_rejects_inconsistent_metadata(self) -> None:
         changes = (
+            ("baseline_id", "provisional_fp32_v1", "baseline_id"),
             ("readout", "mean", "readout"),
             ("delta_config", {"delta_activation": "pre_projection_relu"}, "delta"),
             ("parameter_count", 0, "parameter count"),

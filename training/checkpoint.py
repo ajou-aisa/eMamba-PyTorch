@@ -10,7 +10,7 @@ from models.emamba import EMamba
 from models.mamba.block import EMambaBlock
 
 
-BASELINE_ID = "provisional_fp32_v1"
+BASELINE_ID = "provisional_fp32_v2_flatten"
 MODEL_DEFAULTS = {
     "d_model": 20, "expand": 2, "patch_size": 2, "num_blocks": 2,
     "d_state": 8, "out_dim": 57, "in_channels": 5,

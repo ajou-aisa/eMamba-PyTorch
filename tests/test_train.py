@@ -31,7 +31,7 @@ class TrainingEntryTests(unittest.TestCase):
     def test_run_config_and_history_keep_raw_data(self) -> None:
         validation = {
             "split": "validation", "samples": 1, "checkpoint": "current",
-            "baseline_id": "provisional_fp32_v1",
+            "baseline_id": "provisional_fp32_v2_flatten",
             "mae_cm": {axis: 8.26 for axis in ("x", "y", "z", "all")},
             "rmse_cm": {axis: 10.9 for axis in ("x", "y", "z", "all")},
         }
@@ -40,7 +40,7 @@ class TrainingEntryTests(unittest.TestCase):
             with self.subTest(json_stdout=json_stdout), tempfile.TemporaryDirectory() as directory:
                 root = Path(directory)
                 args = argparse.Namespace(
-                    mode="train", device="cpu", seed=0, readout="mean", lr=1e-3,
+                    mode="train", device="cpu", seed=0, readout="flatten", lr=1e-3,
                     batch_size=128, num_workers=0, data_root=root,
                     output_dir=root / "run", epochs=1, steps=None,
                     debug_numerics=False, no_progress=True, json_stdout=json_stdout,
@@ -65,8 +65,8 @@ class TrainingEntryTests(unittest.TestCase):
                                     parse_constant=reject)
                 history = json.loads((root / "run/history.jsonl").read_text(),
                                      parse_constant=reject)
-                self.assertEqual(config["baseline_id"], "provisional_fp32_v1")
-                self.assertEqual(config["parameter_count"], 9077)
+                self.assertEqual(config["baseline_id"], "provisional_fp32_v2_flatten")
+                self.assertEqual(config["parameter_count"], 15497)
                 self.assertEqual(config["training_config"]["optimizer"], "AdamW")
                 self.assertEqual(config["training_config"]["weight_decay"], 0.01)
                 self.assertEqual(history["validation"], validation)
@@ -83,7 +83,7 @@ class TrainingEntryTests(unittest.TestCase):
             root = Path(directory)
             loader = DataLoader(TensorDataset(torch.zeros(1, 8, 8, 5), torch.zeros(1, 57)))
             args = argparse.Namespace(
-                mode="train", device="cpu", seed=0, readout="mean", lr=1e-3,
+                mode="train", device="cpu", seed=0, readout="flatten", lr=1e-3,
                 batch_size=128, num_workers=0, data_root=root,
                 output_dir=root / "run", epochs=2, steps=None,
                 debug_numerics=False, no_progress=True, json_stdout=False,
@@ -197,7 +197,7 @@ class TrainingEntryTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             args = argparse.Namespace(
-                mode="train", device="cpu", seed=0, readout="mean", lr=1e-3,
+                mode="train", device="cpu", seed=0, readout="flatten", lr=1e-3,
                 batch_size=2, num_workers=0, data_root=root,
                 output_dir=root / "run", epochs=2, steps=None,
                 debug_numerics=False, no_progress=True, json_stdout=False,

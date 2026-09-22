@@ -10,46 +10,44 @@ class OutputHead(nn.Module):
         self,
         d_model: int,
         out_dim: int,
-        readout: str = "mean",
+        readout: str = "flatten",
+        *,
+        num_tokens: int = 16,
     ) -> None:
         super().__init__()
 
-        if d_model <= 0 or out_dim <= 0:
-            raise ValueError("d_model and out_dim must be positive.")
+        if d_model <= 0 or out_dim <= 0 or num_tokens <= 0:
+            message = "d_model, out_dim and num_tokens must be positive."
+            raise ValueError(message)
 
-        if readout not in ("mean", "last"):
+        if readout != "flatten":
             raise ValueError(f"Unsupported readout: {readout!r}")
 
         self.d_model = d_model
         self.out_dim = out_dim
         self.readout = readout
+        self.num_tokens = num_tokens
+        self.flatten = nn.Flatten(start_dim=1)
 
-        # Reproduction assumption: one affine projection with bias.
-        self.proj = nn.Linear(d_model, out_dim, bias=True)
+        self.proj = nn.Sequential(
+            nn.Linear(num_tokens * d_model, d_model, bias=True),
+            nn.ReLU(),
+            nn.Linear(d_model, out_dim, bias=True),
+        )
 
     def forward(self, tokens: Tensor) -> Tensor:
-        if tokens.ndim != 3 or tokens.shape[-1] != self.d_model:
+        if tokens.ndim != 3 or tokens.shape[1:] != (self.num_tokens, self.d_model):
             raise ValueError(
-                f"Expected [B, L, {self.d_model}], got {tuple(tokens.shape)}"
+                f"Expected [B, {self.num_tokens}, {self.d_model}], got {tuple(tokens.shape)}"
             )
-        if tokens.shape[1] == 0:
-            raise ValueError("The token sequence must not be empty.")
-
-        if self.readout == "mean":
-            frame = tokens.mean(dim=1)
-        else:
-            frame = tokens[:, -1, :]
-
-        return self.proj(frame)
+        return self.proj(self.flatten(tokens))
 
     def extra_repr(self) -> str:
         return (
             f"d_model={self.d_model}, out_dim={self.out_dim}, "
-            f"readout={self.readout!r}"
+            f"readout={self.readout!r}, num_tokens={self.num_tokens}"
         )
 
 
 # Reproduction notes:
 # The eMamba paper does not specify the exact output-head architecture.
-# Use mean pooling as the baseline and last-token readout as an alternative.
-# Compare separately trained models using the validation split.

@@ -29,7 +29,7 @@ class ResumeArgumentTests(unittest.TestCase):
         args = self.parse("--mode", "train")
         self.assertEqual((args.epochs, args.batch_size, args.lr, args.seed,
                           args.num_workers, args.readout),
-                         (1, 128, 1e-3, 0, 0, "mean"))
+                         (1, 128, 1e-3, 0, 0, "flatten"))
         self.assertIsNone(args.resume)
 
     def test_resume_uses_last_checkpoint_directory(self) -> None:
@@ -52,7 +52,7 @@ class ResumeArgumentTests(unittest.TestCase):
                     "--epochs", "3")
         self.reject(*base, "--output-dir", "results/other")
         for option, value in (("--lr", "0.0001"), ("--batch-size", "32"),
-                              ("--seed", "1"), ("--readout", "last"),
+                              ("--seed", "1"), ("--readout", "flatten"),
                               ("--num-workers", "2")):
             with self.subTest(option=option):
                 self.reject(*base, option, value)
@@ -75,7 +75,7 @@ class ResumeTrainingTests(unittest.TestCase):
             batch_size=2 if resume is None else None,
             lr=1e-3 if resume is None else None,
             seed=0 if resume is None else None,
-            readout="mean" if resume is None else None,
+            readout="flatten" if resume is None else None,
             num_workers=0 if resume is None else None,
             checkpoint=None, split=None, resume=resume,
             debug_numerics=False, no_progress=True, json_stdout=True,
