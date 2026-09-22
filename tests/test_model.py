@@ -14,6 +14,9 @@ class PatchEmbeddingTests(unittest.TestCase):
     def test_patch_values_follow_row_major_order(self) -> None:
         frames = torch.arange(32, dtype=torch.float32).reshape(1, 4, 4, 2)
         patch = PatchEmbedding(in_channels=2, patch_size=2, d_model=8)
+        with torch.no_grad():
+            patch.proj.weight.copy_(torch.arange(64, dtype=torch.float32).reshape(8, 8) / 64)
+            patch.proj.bias.copy_(torch.arange(8, dtype=torch.float32))
 
         tokens = patch(frames)
 
@@ -21,10 +24,25 @@ class PatchEmbeddingTests(unittest.TestCase):
             [frames[0, row:row + 2, col:col + 2].flatten()
              for row in (0, 2) for col in (0, 2)]
         ).unsqueeze(0)
+        expected = expected @ patch.proj.weight.T + patch.proj.bias
         torch.testing.assert_close(tokens, expected)
 
+    def test_projection_changes_width_and_has_finite_backward(self) -> None:
+        patch = PatchEmbedding(in_channels=2, patch_size=2, d_model=7)
+        frames = torch.randn(2, 4, 4, 2, requires_grad=True)
+
+        tokens = patch(frames)
+        tokens.square().mean().backward()
+
+        self.assertEqual(tuple(tokens.shape), (2, 4, 7))
+        assert frames.grad is not None
+        self.assertTrue(torch.isfinite(frames.grad).all())
+        for parameter in patch.parameters():
+            assert parameter.grad is not None
+            self.assertTrue(torch.isfinite(parameter.grad).all())
+
     def test_rejects_invalid_configuration_and_frames(self) -> None:
-        for settings in ((0, 2, 0), (2, 0, 0), (2, 2, 0), (2, 2, 7)):
+        for settings in ((0, 2, 0), (2, 0, 0), (2, 2, 0)):
             with self.subTest(settings=settings), self.assertRaises(ValueError):
                 PatchEmbedding(*settings)
 
@@ -82,7 +100,7 @@ class OutputHeadTests(unittest.TestCase):
 
     def test_mlp_parameter_count(self) -> None:
         self.assertEqual(sum(p.numel() for p in OutputHead(20, 57).parameters()), 7617)
-        self.assertEqual(sum(p.numel() for p in EMamba().parameters()), 15297)
+        self.assertEqual(sum(p.numel() for p in EMamba().parameters()), 15717)
 
     def test_rejects_invalid_input_and_has_finite_backward(self) -> None:
         head = OutputHead(2, 3, num_tokens=4)

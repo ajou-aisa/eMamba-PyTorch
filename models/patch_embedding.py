@@ -15,10 +15,7 @@ class PatchEmbedding(nn.Module):
         self.d_model = d_model
 
         patch_dim = patch_size * patch_size * in_channels
-        if patch_dim != d_model:
-            raise ValueError(
-                f"patch_dim {patch_dim} != d_model {d_model}"
-            )
+        self.proj = nn.Linear(patch_dim, d_model, bias=True)
 
     def forward(self, frames: Tensor) -> Tensor:
         if frames.ndim != 4:
@@ -59,22 +56,16 @@ class PatchEmbedding(nn.Module):
         # Number of patches
         L = (H // P) * (W // P)
 
-        # [B, H/P, W/P, P, P, C]
-        # -> [B, L, D]
         tokens = patches.reshape(
             B,
             L,
-            self.d_model,
+            -1,
         )
 
-        return tokens
+        return self.proj(tokens)
 
     def extra_repr(self) -> str:
         return (
             f"in_channels={self.in_channels}, patch_size={self.patch_size}, "
             f"d_model={self.d_model}"
         )
-
-
-# Reproduction assumption: patches are row-major flattened values without a
-# learnable projection. The paper does not establish this embedding detail.
