@@ -5,11 +5,12 @@ import random
 import sys
 import warnings
 from pathlib import Path
+from typing import Final
 
 import numpy as np
 import torch
 from torch import nn
-from torch.utils.data import DataLoader
+from torch.utils.data import ConcatDataset, DataLoader, random_split
 
 from datasets.mars import MARSDataset
 from models.emamba import EMamba
@@ -30,7 +31,8 @@ from training.resume import validate_resume_files, validate_training_config
 
 ROOT = Path(__file__).resolve().parent
 SPLIT_FILES = {"train": "train", "validation": "validate", "test": "test"}
-SPLIT_SIZES = {"train": 24066, "validation": 8033, "test": 7984}
+SOURCE_SIZES: Final = {"train": 24066, "validation": 8033, "test": 7984}
+SPLIT_SIZES: Final = {"train": 25652, "validation": 6414, "test": 8017}
 
 
 def parse_args() -> argparse.Namespace:
@@ -145,19 +147,26 @@ def set_seed(seed: int) -> None:
 def build_dataloaders(
     data_root: Path, splits: tuple[str, ...], batch_size: int, num_workers: int,
 ) -> dict[str, DataLoader]:
-    loaders = {}
-    for split in splits:
-        suffix = SPLIT_FILES[split]
+    sources = []
+    for split, suffix in SPLIT_FILES.items():
         features = data_root / f"featuremap_{suffix}.npy"
         labels = data_root / f"labels_{suffix}.npy"
         dataset = MARSDataset(features, labels)
-        if len(dataset) != SPLIT_SIZES[split]:
+        if len(dataset) != SOURCE_SIZES[split]:
             raise ValueError(
-                f"{split} at {data_root}: expected {SPLIT_SIZES[split]} samples, "
+                f"{split} at {data_root}: expected {SOURCE_SIZES[split]} samples, "
                 f"got {len(dataset)}"
             )
+        sources.append(dataset)
+    partitions = random_split(
+        ConcatDataset(sources), list(SPLIT_SIZES.values()),
+        generator=torch.Generator().manual_seed(0),
+    )
+    datasets = dict(zip(SPLIT_SIZES, partitions, strict=True))
+    loaders = {}
+    for split in splits:
         loaders[split] = DataLoader(
-            dataset, batch_size=batch_size, shuffle=split == "train",
+            datasets[split], batch_size=batch_size, shuffle=split == "train",
             num_workers=num_workers, drop_last=False,
         )
     return loaders
@@ -193,8 +202,8 @@ def main() -> None:
         model_config = {**MODEL_DEFAULTS, "readout": args.readout}
         model = EMamba(**model_config).to(device).float()
         criterion = nn.MSELoss()
-        optimizer = torch.optim.Adam(
-            model.parameters(), lr=args.lr, betas=(0.9, 0.999), weight_decay=0,
+        optimizer = torch.optim.AdamW(
+            model.parameters(), lr=args.lr, betas=(0.9, 0.999), weight_decay=0.01,
         )
         training_config = {
             "precision": "fp32", "optimizer": type(optimizer).__name__,
@@ -327,6 +336,11 @@ def main() -> None:
     history_path = args.output_dir / "history.jsonl"
     if not args.json_stdout:
         print_epoch_header()
+
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+        optimizer, T_max=args.epochs, eta_min=1e-6,
+    )
+
     for epoch in range(start_epoch, args.epochs + 1):
         train_loss, global_step = train_one_epoch(
             model, loaders["train"], criterion, optimizer, device, epoch, global_step,
@@ -343,6 +357,7 @@ def main() -> None:
         if not math.isfinite(current_rmse_cm):
             raise FloatingPointError(f"validation epoch={epoch}: mean RMSE is nonfinite")
         is_best = current_rmse_cm < best_rmse_cm
+        scheduler.step()
         rng_state = capture_rng_state()
         if is_best:
             best_rmse_cm = current_rmse_cm
@@ -367,6 +382,10 @@ def main() -> None:
                 epoch, args.epochs, train_loss, validation, best_rmse_cm, is_best,
                 show_axis_metrics=args.debug_numerics,
             )
+
+        if epoch - best_epoch >= 15:
+            break
+
     if not args.json_stdout:
         assert best_validation is not None and last_validation is not None
         print_training_summary(

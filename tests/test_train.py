@@ -2,6 +2,7 @@ import argparse
 import contextlib
 import io
 import json
+import math
 import sys
 import tempfile
 import unittest
@@ -66,7 +67,8 @@ class TrainingEntryTests(unittest.TestCase):
                                      parse_constant=reject)
                 self.assertEqual(config["baseline_id"], "provisional_fp32_v1")
                 self.assertEqual(config["parameter_count"], 9077)
-                self.assertEqual(config["training_config"]["optimizer"], "Adam")
+                self.assertEqual(config["training_config"]["optimizer"], "AdamW")
+                self.assertEqual(config["training_config"]["weight_decay"], 0.01)
                 self.assertEqual(history["validation"], validation)
                 self.assertEqual(history["best_validation_rmse_cm"], 10.9)
                 if json_stdout:
@@ -106,6 +108,43 @@ class TrainingEntryTests(unittest.TestCase):
             self.assertIn("Best MAE        8.000 cm", output.getvalue())
             self.assertNotIn("Best MAE        7.000 cm", output.getvalue())
 
+    def test_cosine_lr_and_early_stopping_keep_final_checkpoint(self) -> None:
+        loader = DataLoader(TensorDataset(torch.zeros(2, 8, 8, 5), torch.zeros(2, 57)))
+        for epochs, improvement_epoch, expected_last in ((2, 1, 2), (100, 1, 16), (100, 5, 20)):
+            with self.subTest(epochs=epochs, improvement_epoch=improvement_epoch):
+                with tempfile.TemporaryDirectory() as directory:
+                    output_dir = Path(directory) / "run"
+                    metrics = [
+                        {"rmse_cm": {"all": 9.0 if epoch >= improvement_epoch else 10.0},
+                         "mae_cm": {"all": 8.0}}
+                        for epoch in range(1, epochs + 1)
+                    ]
+                    with (
+                        patch.object(sys, "argv", [
+                            "train.py", "--mode", "train", "--device", "cpu",
+                            "--epochs", str(epochs), "--output-dir", str(output_dir),
+                            "--json-stdout",
+                        ]),
+                        patch.object(train, "build_dataloaders",
+                                     return_value={"train": loader, "validation": loader}),
+                        patch.object(train, "evaluate", side_effect=metrics),
+                        contextlib.redirect_stdout(io.StringIO()),
+                    ):
+                        train.main()
+                    last = torch.load(output_dir / "last.pt", weights_only=True)
+                    best = torch.load(output_dir / "best.pt", weights_only=True)
+                    history = (output_dir / "history.jsonl").read_text().splitlines()
+                    expected_lr = 1e-6 + (1e-3 - 1e-6) * (
+                        1 + math.cos(math.pi * expected_last / epochs)
+                    ) / 2
+                    self.assertEqual(last["epoch"], expected_last)
+                    self.assertEqual(best["epoch"], improvement_epoch)
+                    self.assertEqual(len(history), expected_last)
+                    self.assertEqual(last["training_config"]["optimizer"], "AdamW")
+                    group = last["optimizer_state_dict"]["param_groups"][0]
+                    self.assertEqual(group["weight_decay"], 0.01)
+                    self.assertAlmostEqual(group["lr"], expected_lr, places=12)
+
     def test_real_split_count_is_checked(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -113,6 +152,46 @@ class TrainingEntryTests(unittest.TestCase):
             np.save(root / "labels_train.npy", np.zeros((1, 57)))
             with self.assertRaisesRegex(ValueError, "train.*24066"):
                 train.build_dataloaders(root, ("train",), 128, 0)
+
+    def test_split_ratio_coverage_pairs_and_reproducibility(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            offset = 0
+            for suffix, count in (("train", 24066), ("validate", 8033), ("test", 7984)):
+                ids = np.arange(offset, offset + count, dtype=np.float32)
+                features = np.zeros((count, 8, 8, 5), dtype=np.float32)
+                labels = np.zeros((count, 57), dtype=np.float32)
+                features[:, 0, 0, 0] = ids
+                labels[:, 0] = ids
+                np.save(root / f"featuremap_{suffix}.npy", features)
+                np.save(root / f"labels_{suffix}.npy", labels)
+                offset += count
+
+            expected = {"train": 25652, "validation": 6414, "test": 8017}
+            rng_before = torch.get_rng_state()
+            loaders = train.build_dataloaders(root, tuple(expected), 128, 0)
+            self.assertEqual(train.SPLIT_SIZES, expected)
+            torch.testing.assert_close(torch.get_rng_state(), rng_before)
+            memberships: dict[str, set[float]] = {}
+            for split, loader in loaders.items():
+                ids_seen: list[float] = []
+                for features, labels in loader:
+                    torch.testing.assert_close(features[:, 0, 0, 0], labels[:, 0])
+                    ids_seen.extend(labels[:, 0].tolist())
+                memberships[split] = set(ids_seen)
+                self.assertEqual(len(ids_seen), expected[split])
+                self.assertEqual(len(memberships[split]), expected[split])
+            self.assertFalse(memberships["train"] & memberships["validation"])
+            self.assertFalse(memberships["train"] & memberships["test"])
+            self.assertFalse(memberships["validation"] & memberships["test"])
+            self.assertEqual(set.union(*memberships.values()), set(range(40083)))
+
+            torch.manual_seed(987)
+            repeated = train.build_dataloaders(root, ("validation", "test"), 128, 0)
+            for split, loader in repeated.items():
+                ids_seen = [sample_id for _, labels in loader
+                            for sample_id in labels[:, 0].tolist()]
+                self.assertEqual(set(ids_seen), memberships[split])
 
     def test_train_stops_before_checkpoint_and_history_on_nonfinite_validation(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
