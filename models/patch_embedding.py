@@ -48,6 +48,7 @@ class PatchEmbedding(nn.Module):
         )
 
         # [B, H/P, P, W/P, P, C]
+        # ->         # [B, H/P, P, W/P, P, C]
         # -> [B, H/P, W/P, P, P, C]
         patches = patches.permute(
             0, 1, 3, 2, 4, 5
@@ -56,12 +57,14 @@ class PatchEmbedding(nn.Module):
         # Number of patches
         L = (H // P) * (W // P)
 
+        # [B, H/P, W/P, P, P, C] -> [B, L, P*P*C]
         tokens = patches.reshape(
             B,
             L,
             -1,
         )
 
+        # [B, L, P*P*C] -> [B, L, D]
         return self.proj(tokens)
 
     def extra_repr(self) -> str:

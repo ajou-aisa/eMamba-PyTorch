@@ -64,6 +64,7 @@ class EMambaBlock(nn.Module):
 class MambaConv1D(nn.Module):
     """1D convolution stage in the lower Mamba path."""
 
+    # d_conv : 4 is the default kernel size used in the Mamba paper
     def __init__(self, d_inner: int, d_conv: int = 4) -> None:
         super().__init__()
         if d_inner <= 0 or d_conv <= 0:
@@ -86,6 +87,7 @@ class MambaConv1D(nn.Module):
         if tokens.shape[1] == 0:
             raise ValueError("Token sequence must not be empty")
 
+        # L
         seq_len = tokens.size(1)
 
         # [B, L, ED] -> [B, ED, L]
