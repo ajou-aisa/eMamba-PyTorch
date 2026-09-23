@@ -123,6 +123,30 @@ class ResumeTrainingTests(unittest.TestCase):
                     with self.assertRaisesRegex(ValueError, "already at epoch 2"):
                         self.run_training(output_dir, target, output_dir / "last.pt")
 
+    def test_resume_restores_adamw_and_saved_learning_rate(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            output_dir = Path(directory) / "run"
+            self.run_training(output_dir, 1)
+            with patch.object(train, "train_one_epoch", wraps=train.train_one_epoch) as epoch:
+                self.run_training(output_dir, 2, output_dir / "last.pt")
+            optimizer = epoch.call_args.args[3]
+            self.assertIs(type(optimizer), torch.optim.AdamW)
+            self.assertEqual(optimizer.param_groups[0]["weight_decay"], 0.01)
+            self.assertEqual(optimizer.param_groups[0]["lr"], 1e-6)
+            payload = torch.load(output_dir / "last.pt", weights_only=True)
+            self.assertEqual(payload["epoch"], 2)
+            self.assertEqual(payload["global_step"], 6)
+            self.assertTrue(all(state["step"].item() == 6 for state in optimizer.state.values()))
+
+    def test_resume_preserves_legacy_adam_optimizer(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            output_dir = Path(directory) / "run"
+            with patch.object(torch.optim, "AdamW", torch.optim.Adam):
+                self.run_training(output_dir, 1)
+            with patch.object(train, "train_one_epoch", wraps=train.train_one_epoch) as epoch:
+                self.run_training(output_dir, 2, output_dir / "last.pt")
+            self.assertIs(type(epoch.call_args.args[3]), torch.optim.Adam)
+
     def test_legacy_checkpoint_warns_and_resumes(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             output_dir = Path(directory) / "run"

@@ -251,13 +251,18 @@ def main() -> None:
             args.data_root, ("train", "validation"), args.batch_size, args.num_workers,
         )
         criterion = nn.MSELoss()
-        optimizer = torch.optim.Adam(
+        optimizer_class = {"Adam": torch.optim.Adam, "AdamW": torch.optim.AdamW}[
+            saved_config["optimizer"]
+        ]
+        optimizer = optimizer_class(
             model.parameters(), lr=args.lr, betas=tuple(saved_config["betas"]),
             weight_decay=saved_config["weight_decay"],
         )
         restore_optimizer_state(optimizer, resume_payload, device)
         for group in optimizer.param_groups:
-            if (group["lr"] != args.lr or tuple(group["betas"]) != tuple(saved_config["betas"])
+            if (group.get("initial_lr", group["lr"]) != args.lr
+                    or not math.isfinite(group["lr"]) or group["lr"] < 0
+                    or tuple(group["betas"]) != tuple(saved_config["betas"])
                     or group["weight_decay"] != saved_config["weight_decay"]):
                 raise ValueError("checkpoint optimizer state conflicts with training_config")
         training_config = {**saved_config, "epochs": args.epochs, "tf32": precision}

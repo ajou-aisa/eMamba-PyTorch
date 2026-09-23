@@ -15,8 +15,10 @@ def validate_training_config(payload: dict) -> dict:
         field not in config for field in STABLE_TRAINING_FIELDS
     ):
         raise ValueError("checkpoint training_config is incomplete")
+    if config["optimizer"] not in ("Adam", "AdamW"):
+        raise ValueError("checkpoint training_config optimizer is unsupported")
     for field, expected in (
-        ("optimizer", "Adam"), ("loss", "MSELoss"),
+        ("loss", "MSELoss"),
         ("precision", "fp32"), ("gradient_clip", 1.0),
     ):
         if config[field] != expected:
