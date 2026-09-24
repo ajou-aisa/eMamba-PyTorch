@@ -13,6 +13,7 @@ models/mamba/block.py         RangeNorm, gate, causal depthwise Conv, SSM, resid
 models/mamba/range_norm.py    range normalization over D
 models/mamba/selective_ssm.py sequential selective recurrence
 models/emamba.py              Patch, two blocks, OutputHead
+models/q_emamba.py            INT8 PTQ Patch, quantized blocks, OutputHead
 models/output_head.py         flatten readout and a 320 -> 20 -> 57 MLP
 train.py                      CLI, device/data setup, smoke/train/eval control
 training/engine.py            PyTorch train epoch and inference evaluation
@@ -298,3 +299,72 @@ python train.py --mode eval \
 
 These stored results establish completed local training, not paper fidelity.
 They do not establish official-test performance or INT8/QAT accuracy.
+
+## INT8 post-training quantization
+
+Install the pinned PTQ additions into the existing environment, then convert a
+checkpoint into a new result directory:
+
+```bash
+.venv/bin/python -m pip install -r requirements-ptq.txt
+.venv/bin/python ptq_emamba.py \
+  --checkpoint results/0922_1653_emamba_100ep_seed0/best.pt \
+  --output-dir results/0922_1653_emamba_100ep_seed0_ptq_run01
+```
+
+The default split is `validation`; add `--split test` only for an explicitly
+requested final test report. Calibration always uses the deterministic 2,048
+frame seed-0 training subset, while max-versus-99.9-percentile profile selection
+always uses the full validation split. `--device auto` prefers CUDA and falls
+back to CPU. The destination must not exist, preventing result overwrite.
+
+Conversion writes only `quantized.pt` and `metrics.json`. The checkpoint stores
+contiguous INT8 parameter codes, power-of-two scales, model configuration,
+calibration and dataset fingerprints, numeric policy, and version metadata. A
+source-free reload reconstructs `models.q_emamba.QEMamba`. It reuses the FP32
+`PatchEmbedding`, `OutputHead`, and causal `MambaConv1D` implementations while
+replacing their internal Linear/Conv layers and Mamba blocks with PTQ modules.
+The frozen model can be evaluated with:
+
+```bash
+.venv/bin/python ptq_emamba.py \
+  --artifact results/0922_1653_emamba_100ep_seed0_ptq_run01/quantized.pt \
+  --split validation
+```
+
+Metrics are computed from dequantized coordinates in centimetres through the
+same evaluator as the FP32 baseline. Frozen Linear and depthwise Conv use INT8
+operand codes with INT64 multiplication and accumulation. Bias codes are aligned
+to a common scale before integer addition; outputs are rounded ties-to-even,
+clipped to INT8, and dequantized to FP32 for the next layer. Calibration retains
+the floating-point path. RangeNorm and SSM state arithmetic remain integer;
+SiLU, exponential, delta products, gating, and residual addition remain FP32
+with quantized boundaries. It is not a claim of fully
+integer hardware execution or guaranteed reproduction of paper accuracy.
+
+RangeNorm follows the original operation order: mean, centering, centered
+range with epsilon, normalization division, gamma multiplication, then beta
+addition. Mean/centered values use the input-code scale with 24 fractional bits;
+normalized values use scale `2^-24`, all held in INT64 with ties-to-even
+rounding. Only the final output is clipped to INT8 and dequantized to FP32.
+This replaces the earlier combined-numerator implementation; fixed-point
+rounding need not be bit-identical to FP32 or to that earlier implementation.
+
+The following historical results used FP32 Linear/Conv arithmetic, before the
+INT64 affine and sequential RangeNorm changes. Re-evaluate existing artifacts
+to measure the current code; their INT8 parameters and scales remain compatible.
+
+The local `run01` selected the percentile profile on all 6,420 validation
+samples. Its saved profile hash is
+`3cfaf2a2fa1a7daea7330ec69902de144956cc5cc03664bcff25a6493596f6f9`, and
+source-free reload reproduced output codes on every validation frame.
+
+| Split | Model | Samples | Mean MAE (cm) | Mean RMSE (cm) |
+| --- | --- | ---: | ---: | ---: |
+| validation | FP32 | 6,420 | 5.7771 | 7.9362 |
+| validation | PTQ | 6,420 | 6.1072 | 8.2221 |
+| test | FP32 | 7,984 | 5.9167 | 8.1012 |
+| test | frozen PTQ artifact | 7,984 | 6.2414 | 8.3873 |
+
+The test row is an explicitly requested frozen-artifact evaluation; test data
+did not participate in calibration or profile selection.

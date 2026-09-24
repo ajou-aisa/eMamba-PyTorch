@@ -1,0 +1,6 @@
+brevitas==0.13.3
+numpy==2.4.6
+pytest==8.4.2
+ruff==0.13.2
+torch==2.14.0
+tqdm==4.70.1
