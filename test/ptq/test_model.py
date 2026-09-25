@@ -5,21 +5,20 @@ from torch import nn
 from brevitas.nn import QuantLinear
 
 from models.emamba import EMamba
-from models.q_emamba import QEMamba
 from models.mamba.block import MambaConv1D
-from models.mamba.q_block import QBlock
 from ptq.calibrate import ProfileObserver, candidate_profiles
-from ptq.model import prepare_model
+from ptq.mamba.block import QBlock
+from ptq.model import QEMamba, prepare_model
 from ptq.layers import QLinear
 from ptq.ops import quantize_codes
 from ptq.quant import QuantRuntime
 
 
 def test_component_builder_has_one_owner() -> None:
-    import models.q_emamba as q_model
+    import ptq.components as ptq_components
     import ptq.model as ptq_model
 
-    assert ptq_model.prepare_components is q_model.prepare_components
+    assert ptq_model.prepare_components is ptq_components.prepare_components
 
 
 def test_piecewise_bypass_returns_quantized_model_entry_and_preserves_output() -> None:

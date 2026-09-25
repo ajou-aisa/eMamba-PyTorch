@@ -3,8 +3,8 @@ import torch
 from torch import Tensor
 
 from models.emamba import EMamba
-from models.q_emamba import QEMamba
 from ptq.calibrate import ProfileObserver, candidate_profiles
+from ptq.model import QEMamba
 from ptq.piecewise import piecewise_exp, piecewise_silu
 from ptq.quant import QuantRuntime
 

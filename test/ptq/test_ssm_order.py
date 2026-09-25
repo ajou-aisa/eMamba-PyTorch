@@ -2,8 +2,8 @@ import pytest
 import torch
 
 from models.emamba import EMamba
-from models.q_emamba import QEMamba
 from ptq.calibrate import ProfileObserver, candidate_profiles
+from ptq.model import QEMamba
 from ptq.quant import QuantRuntime
 
 

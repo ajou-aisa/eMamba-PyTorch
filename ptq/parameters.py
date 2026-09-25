@@ -5,8 +5,8 @@ import torch
 from torch import Tensor
 
 from models.emamba import EMamba
-from models.q_emamba import QEMamba
 
+from .model import QEMamba
 from .ops import dequantize_codes, quantize_codes
 from .quant import QuantProfile, QuantRuntime
 class ParameterArtifactError(ValueError):

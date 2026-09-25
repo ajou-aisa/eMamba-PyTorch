@@ -7,7 +7,7 @@ import torch
 
 import ptq.io as artifact_io
 from models.emamba import EMamba
-from models.q_emamba import QEMamba
+from ptq.model import QEMamba
 from ptq.calibrate import ProfileObserver, candidate_profiles
 from ptq.io import ArtifactError, load_quantized, save_quantized
 from models.piecewise import PIECEWISE_SPEC

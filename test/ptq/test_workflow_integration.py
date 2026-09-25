@@ -7,10 +7,9 @@ from torch.utils.data import DataLoader, Subset, TensorDataset
 
 import ptq.workflow as workflow
 from models.emamba import EMamba, NonlinearPolicy
-from models.q_emamba import QEMamba
 from ptq.calibrate import ProfileObserver, candidate_profiles
 from ptq.io import load_quantized
-from ptq.model import prepare_model
+from ptq.model import QEMamba, prepare_model
 from ptq.quant import QuantRuntime
 from ptq.report import JsonValue
 from training.checkpoint import MODEL_DEFAULTS

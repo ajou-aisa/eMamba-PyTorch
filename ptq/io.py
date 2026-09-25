@@ -7,8 +7,8 @@ from typing import NamedTuple
 import torch
 from torch import Tensor
 from models.emamba import EMamba
-from models.q_emamba import QEMamba
 from ptq.parameters import export_parameters, restore_parameters
+from ptq.model import QEMamba
 from ptq.provenance import validate_provenance
 from ptq.quant import QuantProfile
 from models.piecewise import PIECEWISE_SPEC

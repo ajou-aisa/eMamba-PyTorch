@@ -5,6 +5,8 @@
     "train.py",
     "datasets",
     "models",
+    "ptq/model.py",
+    "ptq/mamba",
     "training",
     "tests"
   ],

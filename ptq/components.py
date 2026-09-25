@@ -6,13 +6,13 @@ from torch import Tensor, nn
 
 from models.emamba import EMamba
 from models.mamba.block import EMambaBlock
-from models.mamba.q_block import QBlock
-from models.mamba.q_range_norm import QRangeNorm
-from models.mamba.q_selective_ssm import QSelectiveSSM
 from models.output_head import OutputHead
 from models.patch_embedding import PatchEmbedding
 
 from .layers import QConv1d, QLinear
+from .mamba.block import QBlock
+from .mamba.range_norm import QRangeNorm
+from .mamba.selective_ssm import QSelectiveSSM
 from .quant import QuantRuntime
 
 

@@ -2,8 +2,8 @@ import torch
 from torch import nn
 
 from models.emamba import EMamba
-from models.q_emamba import QEMamba
 from ptq.calibrate import ProfileObserver
+from ptq.model import QEMamba
 from ptq.quant import QuantRuntime
 
 

@@ -6,10 +6,10 @@ from typing import Literal
 import torch
 from torch.utils.data import DataLoader
 from models.emamba import NonlinearPolicy
-from models.q_emamba import QEMamba
 from ptq.calibrate import (ProfileObserver, candidate_profiles, collect_calibration,
                            index_hash, profile_hash, select_indices)
 from ptq.io import ArtifactError, load_quantized, save_quantized
+from ptq.model import QEMamba
 from ptq.quant import QuantProfile, QuantRuntime
 from ptq.report import WorkflowReport
 from training.checkpoint import load_checkpoint

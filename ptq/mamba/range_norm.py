@@ -6,7 +6,7 @@ from torch import Tensor, nn
 from ptq.ops import INT64_MAX, align_codes, checked_add, checked_mul, dequantize_codes, saturate
 from ptq.quant import QuantRuntime
 
-from .q_range_norm_math import NORM_FRACTION_BITS, left_shift_checked, round_ratio
+from .range_norm_math import NORM_FRACTION_BITS, left_shift_checked, round_ratio
 
 
 # QRangeNorm: nn.RangeNorm -> QRangeNorm

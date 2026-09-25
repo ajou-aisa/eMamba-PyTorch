@@ -1,7 +1,7 @@
 import torch
 
-from models.mamba.q_range_norm import QRangeNorm
-from models.mamba.q_range_norm_math import round_ratio
+from ptq.mamba.range_norm import QRangeNorm
+from ptq.mamba.range_norm_math import round_ratio
 from ptq.quant import QuantEntry, QuantProfile, QuantRuntime
 
 

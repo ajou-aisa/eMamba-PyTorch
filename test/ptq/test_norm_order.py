@@ -3,8 +3,8 @@ from fractions import Fraction
 import pytest
 import torch
 
-from models.mamba.q_range_norm import QRangeNorm
 from models.mamba.range_norm import RangeNorm
+from ptq.mamba.range_norm import QRangeNorm
 from ptq.quant import QuantEntry, QuantProfile, QuantRuntime
 
 
