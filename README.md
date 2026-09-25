@@ -7,18 +7,21 @@ from the paper remain reproduction choices pending author confirmation.
 ## Structure
 
 ```text
-datasets/mars.py              MARS NumPy loader and integrity checks
+datasets/mars.py              MARS loader, integrity checks, split, DataLoader setup
 models/patch_embedding.py     row-major 2×2 flattening and Linear projection
 models/mamba/block.py         RangeNorm, gate, causal depthwise Conv, SSM, residual
 models/mamba/range_norm.py    range normalization over D
 models/mamba/selective_ssm.py sequential selective recurrence
 models/emamba.py              Patch, two blocks, OutputHead
 models/piecewise.py           FP32 piecewise SiLU and exp
-models/q_emamba.py            INT8 PTQ Patch, quantized blocks, OutputHead
 models/output_head.py         flatten readout and a 320 -> 20 -> 57 MLP
-ptq/components.py             quantized layer and block assembly
+ptq/model.py                  INT8 PTQ Patch, quantized blocks, OutputHead
+ptq/mamba/                   quantized Mamba block, RangeNorm, SSM
+ptq/components.py            quantized layer and block assembly
+ptq/artifact.py              quantized artifact save/load
+ptq/conversion.py            checkpoint conversion and calibration workflow
+ptq_emamba.py                PTQ conversion and frozen-artifact evaluation CLI
 train.py                      CLI argument parsing and entry point
-training/data.py              deterministic MARS split and DataLoader setup
 training/runtime.py           device, FP32 precision, and seed setup
 training/session.py           fresh and resumed run initialization
 training/workflow.py          smoke/train/eval orchestration
@@ -28,11 +31,16 @@ training/checkpoint.py        checkpoint save/load and run metadata
 training/resume.py            resume configuration and history validation
 training/diagnostics.py       smoke-only delta statistics
 training/reporting.py         human-readable terminal summaries
-tests/                        unit and pipeline checks
-tests/test_conv.py            causal Conv checks
-run.sh                        environment activation and commented training example
+tests/                        FP32 unit and pipeline checks
+test/ptq/                     optional PTQ tests (pytest and Brevitas)
 third_party/MARS/feature/     public MARS NumPy files from submodule
 ```
+
+Python imports now use `datasets.mars` for MARS data and `ptq.model` /
+`ptq.mamba` for quantized models. The former `training.data`,
+`models.q_emamba`, and `models.mamba.q_*` module paths were removed.
+PTQ artifact and conversion imports now use `ptq.artifact` and
+`ptq.conversion` instead of `ptq.io` and `ptq.workflow`.
 
 Paper-reported MARS dimensions: D=20, E=2 (ED=40), P=2, M=2, N=8,
 and 57 outputs. Default model has **15,717 parameters** and **62,868 bytes**
@@ -101,9 +109,6 @@ python train.py --mode eval \
   --checkpoint results/provisional_fp32_v2_flatten/best.pt \
   --split test --device auto
 ```
-
-`run.sh` currently activates `.venv`; its training command is commented out.
-Run the CLI directly or uncomment and adjust that example to start training.
 
 Terminal output defaults to a compact run summary, one row per epoch,
 and a final best-checkpoint summary. Train and validation batch bars use
@@ -343,7 +348,7 @@ back to CPU. The destination must not exist, preventing result overwrite.
 Conversion writes only `quantized.pt` and `metrics.json`. The checkpoint stores
 contiguous INT8 parameter codes, power-of-two scales, model configuration,
 calibration and dataset fingerprints, numeric policy, and version metadata. A
-source-free reload reconstructs `models.q_emamba.QEMamba`. It reuses the FP32
+source-free reload reconstructs `ptq.model.QEMamba`. It reuses the FP32
 `PatchEmbedding`, `OutputHead`, and causal `MambaConv1D` implementations while
 replacing their internal Linear/Conv layers and Mamba blocks with PTQ modules.
 The frozen model can be evaluated with:
