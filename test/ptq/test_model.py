@@ -15,6 +15,13 @@ from ptq.ops import quantize_codes
 from ptq.quant import QuantRuntime
 
 
+def test_component_builder_has_one_owner() -> None:
+    import models.q_emamba as q_model
+    import ptq.model as ptq_model
+
+    assert ptq_model.prepare_components is q_model.prepare_components
+
+
 def test_piecewise_bypass_returns_quantized_model_entry_and_preserves_output() -> None:
     torch.manual_seed(3)
     source = EMamba()

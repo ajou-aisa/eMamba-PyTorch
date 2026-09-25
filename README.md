@@ -16,6 +16,7 @@ models/emamba.py              Patch, two blocks, OutputHead
 models/piecewise.py           FP32 piecewise SiLU and exp
 models/q_emamba.py            INT8 PTQ Patch, quantized blocks, OutputHead
 models/output_head.py         flatten readout and a 320 -> 20 -> 57 MLP
+ptq/components.py             quantized layer and block assembly
 train.py                      CLI argument parsing and entry point
 training/data.py              deterministic MARS split and DataLoader setup
 training/runtime.py           device, FP32 precision, and seed setup
