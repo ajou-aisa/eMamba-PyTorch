@@ -10,7 +10,7 @@ from training.checkpoint import (
     BASELINE_ID, capture_rng_state, delta_configuration, load_checkpoint,
     parameter_size, save_checkpoint,
 )
-from training.data import SPLIT_SIZES, build_dataloaders
+from datasets.mars import SPLIT_SIZES, build_dataloaders
 from training.diagnostics import diagnose_delta
 from training.engine import evaluate, train_one_epoch
 from training.reporting import (

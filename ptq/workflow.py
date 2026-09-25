@@ -13,7 +13,7 @@ from ptq.io import ArtifactError, load_quantized, save_quantized
 from ptq.quant import QuantProfile, QuantRuntime
 from ptq.report import WorkflowReport
 from training.checkpoint import load_checkpoint
-from training.data import SPLIT_FILES, build_dataloaders
+from datasets.mars import SPLIT_FILES, build_dataloaders
 from training.engine import evaluate
 from training.runtime import configure_fp32
 

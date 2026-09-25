@@ -4,7 +4,7 @@ from pathlib import Path
 import torch as torch
 
 from training.checkpoint import BASELINE_ID
-from training.data import (
+from datasets.mars import (
     SPLIT_FILES as SPLIT_FILES, SOURCE_SIZES as SOURCE_SIZES,
     SPLIT_SIZES as SPLIT_SIZES, build_dataloaders as build_dataloaders,
 )
