@@ -11,7 +11,7 @@ from models.q_emamba import QEMamba
 from ptq.parameters import export_parameters, restore_parameters
 from ptq.provenance import validate_provenance
 from ptq.quant import QuantProfile
-from ptq.piecewise import PIECEWISE_SPEC
+from models.piecewise import PIECEWISE_SPEC
 from training.checkpoint import MODEL_DEFAULTS
 _FORMAT = "emamba-ptq-v1"
 _POLICY = {"scale": "power_of_two", "zero_point": 0, "rounding": "ties_to_even",

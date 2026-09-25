@@ -3,7 +3,7 @@ from torch import Tensor, nn
 
 from ptq.ops import dequantize_codes, integer_ssm_step
 from ptq.quant import QuantizationError, QuantRuntime
-from ptq.piecewise import piecewise_exp
+from ..piecewise import piecewise_exp
 
 
 class QSelectiveSSM(nn.Module):

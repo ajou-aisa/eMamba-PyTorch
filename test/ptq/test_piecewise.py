@@ -6,7 +6,15 @@ import pytest
 import torch
 from torch import Tensor
 
-from ptq.piecewise import EXP_KNOTS, SILU_KNOTS, piecewise_exp, piecewise_silu
+from models.piecewise import EXP_KNOTS, SILU_KNOTS, piecewise_exp, piecewise_silu
+
+
+def test_legacy_imports_share_model_piecewise_implementation() -> None:
+    import models.piecewise as model_piecewise
+    import ptq.piecewise as ptq_piecewise
+
+    for name in ("EXP_KNOTS", "SILU_KNOTS", "PIECEWISE_SPEC", "piecewise_exp", "piecewise_silu"):
+        assert getattr(ptq_piecewise, name) is getattr(model_piecewise, name)
 
 
 def reference(value: float, knots: tuple[float, ...], function: Callable[[float], float]) -> float:

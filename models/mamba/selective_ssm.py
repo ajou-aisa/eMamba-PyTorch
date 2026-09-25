@@ -5,7 +5,7 @@ import math
 import torch
 from torch import Tensor, nn
 
-from ptq.piecewise import piecewise_exp
+from ..piecewise import piecewise_exp
 
 
 class SelectiveSSM(nn.Module):

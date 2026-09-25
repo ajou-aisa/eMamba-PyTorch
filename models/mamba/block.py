@@ -2,7 +2,7 @@
 
 from torch import Tensor, nn
 
-from ptq.piecewise import piecewise_silu
+from ..piecewise import piecewise_silu
 
 from .range_norm import RangeNorm
 from .selective_ssm import SelectiveSSM

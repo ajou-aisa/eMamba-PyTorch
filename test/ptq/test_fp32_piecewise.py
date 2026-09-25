@@ -4,7 +4,7 @@ import pytest
 from models.emamba import EMamba
 from models.mamba.block import EMambaBlock
 from models.mamba.selective_ssm import SelectiveSSM
-from ptq.piecewise import piecewise_exp, piecewise_silu
+from models.piecewise import piecewise_exp, piecewise_silu
 
 
 @pytest.mark.parametrize("use_pwl", [False, True])

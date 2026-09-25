@@ -10,7 +10,7 @@ from models.emamba import EMamba
 from models.q_emamba import QEMamba
 from ptq.calibrate import ProfileObserver, candidate_profiles
 from ptq.io import ArtifactError, load_quantized, save_quantized
-from ptq.piecewise import PIECEWISE_SPEC
+from models.piecewise import PIECEWISE_SPEC
 from ptq.quant import QuantRuntime
 from ptq_emamba import parse_args
 from training.checkpoint import MODEL_DEFAULTS

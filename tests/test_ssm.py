@@ -4,7 +4,7 @@ import unittest
 import torch
 
 from models.mamba.selective_ssm import SelectiveSSM
-from ptq.piecewise import piecewise_exp
+from models.piecewise import piecewise_exp
 
 
 class SelectiveSSMTests(unittest.TestCase):

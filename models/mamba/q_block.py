@@ -2,7 +2,7 @@ import torch
 from torch import Tensor, nn
 
 from ptq.quant import QuantRuntime
-from ptq.piecewise import piecewise_silu
+from ..piecewise import piecewise_silu
 
 
 class QBlock(nn.Module):
