@@ -11,6 +11,7 @@ import torch
 from torch.utils.data import DataLoader, TensorDataset
 
 import train
+from training import session as training_session
 
 
 class TrainCliTests(unittest.TestCase):
@@ -25,8 +26,8 @@ class TrainCliTests(unittest.TestCase):
                     "train.py", "--mode", "smoke", "--device", "cpu", "--steps", "1",
                     "--output-dir", str(output_dir), "--json-stdout",
                 ]),
-                patch.object(train, "build_dataloaders", return_value={"train": loader}),
-                patch.object(train, "training_data_fingerprint", return_value="a" * 64),
+                patch.object(training_session, "build_dataloaders", return_value={"train": loader}),
+                patch.object(training_session, "training_data_fingerprint", return_value="a" * 64),
                 patch.object(train, "diagnose_delta", return_value=[]),
                 patch.object(train, "train_one_epoch", return_value=(0.0, 1)),
                 contextlib.redirect_stdout(output),

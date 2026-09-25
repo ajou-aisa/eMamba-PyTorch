@@ -13,6 +13,7 @@ import torch
 from torch.utils.data import DataLoader, TensorDataset
 
 import train
+from training import session as training_session
 
 
 class ResumeArgumentTests(unittest.TestCase):
@@ -95,8 +96,8 @@ class ResumeTrainingTests(unittest.TestCase):
         )
         with (
             patch.object(train, "parse_args", return_value=args),
-            patch.object(train, "build_dataloaders", side_effect=self.loaders),
-            patch.object(train, "training_data_fingerprint", return_value=fingerprint, create=True),
+            patch.object(training_session, "build_dataloaders", side_effect=self.loaders),
+            patch.object(training_session, "training_data_fingerprint", return_value=fingerprint),
             contextlib.redirect_stdout(io.StringIO()),
         ):
             train.main()
