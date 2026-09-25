@@ -15,6 +15,7 @@ from torch.utils.data import DataLoader, TensorDataset
 
 import train
 from training import session as training_session
+from training import workflow as training_workflow
 
 
 class TrainingEntryTests(unittest.TestCase):
@@ -53,9 +54,9 @@ class TrainingEntryTests(unittest.TestCase):
                     patch.object(training_session, "build_dataloaders",
                                  return_value={"train": loader, "validation": loader}),
                     patch.object(training_session, "training_data_fingerprint", return_value="a" * 64),
-                    patch.object(train, "train_one_epoch", return_value=(0.308325, 1)),
-                    patch.object(train, "evaluate", return_value=validation),
-                    patch.object(train, "save_checkpoint"),
+                    patch.object(training_workflow, "train_one_epoch", return_value=(0.308325, 1)),
+                    patch.object(training_workflow, "evaluate", return_value=validation),
+                    patch.object(training_workflow, "save_checkpoint"),
                     contextlib.redirect_stdout(output),
                 ):
                     train.main()
@@ -101,9 +102,9 @@ class TrainingEntryTests(unittest.TestCase):
                 patch.object(training_session, "build_dataloaders",
                              return_value={"train": loader, "validation": loader}),
                 patch.object(training_session, "training_data_fingerprint", return_value="a" * 64),
-                patch.object(train, "train_one_epoch", return_value=(0.1, 1)),
-                patch.object(train, "evaluate", side_effect=validations),
-                patch.object(train, "save_checkpoint"),
+                patch.object(training_workflow, "train_one_epoch", return_value=(0.1, 1)),
+                patch.object(training_workflow, "evaluate", side_effect=validations),
+                patch.object(training_workflow, "save_checkpoint"),
                 contextlib.redirect_stdout(output),
             ):
                 train.main()
@@ -131,7 +132,7 @@ class TrainingEntryTests(unittest.TestCase):
                         patch.object(training_session, "build_dataloaders",
                                      return_value={"train": loader, "validation": loader}),
                         patch.object(training_session, "training_data_fingerprint", return_value="a" * 64),
-                        patch.object(train, "evaluate", side_effect=metrics),
+                        patch.object(training_workflow, "evaluate", side_effect=metrics),
                         contextlib.redirect_stdout(io.StringIO()),
                     ):
                         train.main()
@@ -218,9 +219,9 @@ class TrainingEntryTests(unittest.TestCase):
                 patch.object(training_session, "build_dataloaders",
                              return_value={"train": [], "validation": []}),
                 patch.object(training_session, "training_data_fingerprint", return_value="a" * 64),
-                patch.object(train, "train_one_epoch", return_value=(1.0, 1)) as train_epoch,
-                patch.object(train, "evaluate", return_value=invalid),
-                patch.object(train, "save_checkpoint") as save,
+                patch.object(training_workflow, "train_one_epoch", return_value=(1.0, 1)) as train_epoch,
+                patch.object(training_workflow, "evaluate", return_value=invalid),
+                patch.object(training_workflow, "save_checkpoint") as save,
                 contextlib.redirect_stdout(io.StringIO()),
             ):
                 with self.assertRaisesRegex(FloatingPointError, "validation.*RMSE"):

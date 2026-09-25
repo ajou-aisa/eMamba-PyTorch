@@ -14,6 +14,7 @@ from torch.utils.data import DataLoader, TensorDataset
 
 import train
 from training import session as training_session
+from training import workflow as training_workflow
 
 
 class ResumeArgumentTests(unittest.TestCase):
@@ -108,14 +109,14 @@ class ResumeTrainingTests(unittest.TestCase):
             full = root / "full"
             split = root / "split"
             self.run_training(full, 4)
-            train_epoch = train.train_one_epoch
+            train_epoch = training_workflow.train_one_epoch
 
             def interrupt_after_two_epochs(*args, **kwargs):
                 if args[5] == 3:
                     raise RuntimeError("training interrupted")
                 return train_epoch(*args, **kwargs)
 
-            with patch.object(train, "train_one_epoch", side_effect=interrupt_after_two_epochs):
+            with patch.object(training_workflow, "train_one_epoch", side_effect=interrupt_after_two_epochs):
                 with self.assertRaisesRegex(RuntimeError, "training interrupted"):
                     self.run_training(split, 4)
             self.run_training(split, 4, split / "last.pt")
@@ -202,7 +203,7 @@ class ResumeTrainingTests(unittest.TestCase):
                 torch.save(payload, path)
 
             worse = {"rmse_cm": {"all": first_rmse + 1}, "mae_cm": {"all": 10.0}}
-            with patch.object(train, "evaluate", return_value=worse):
+            with patch.object(training_workflow, "evaluate", return_value=worse):
                 self.run_training(output_dir, 2, output_dir / "last.pt")
             self.assertNotIn("nonlinear_policy", torch.load(output_dir / "best.pt", weights_only=True))
             self.run_training(output_dir, 3, output_dir / "last.pt")
@@ -211,7 +212,7 @@ class ResumeTrainingTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             output_dir = Path(directory) / "run"
             self.run_training(output_dir, 1)
-            with patch.object(train, "train_one_epoch", wraps=train.train_one_epoch) as epoch:
+            with patch.object(training_workflow, "train_one_epoch", wraps=training_workflow.train_one_epoch) as epoch:
                 self.run_training(output_dir, 2, output_dir / "last.pt")
             optimizer = epoch.call_args.args[3]
             self.assertIs(type(optimizer), torch.optim.AdamW)
@@ -230,7 +231,7 @@ class ResumeTrainingTests(unittest.TestCase):
             output_dir = Path(directory) / "run"
             with patch.object(torch.optim, "AdamW", torch.optim.Adam):
                 self.run_training(output_dir, 1)
-            with patch.object(train, "train_one_epoch", wraps=train.train_one_epoch) as epoch:
+            with patch.object(training_workflow, "train_one_epoch", wraps=training_workflow.train_one_epoch) as epoch:
                 self.run_training(output_dir, 2, output_dir / "last.pt")
             self.assertIs(type(epoch.call_args.args[3]), torch.optim.Adam)
 
@@ -259,8 +260,8 @@ class ResumeTrainingTests(unittest.TestCase):
             original_best = (output_dir / "best.pt").read_bytes()
             worse = {"rmse_cm": {"all": best_rmse + 1}, "mae_cm": {"all": 10.0}}
             with (
-                patch.object(train, "train_one_epoch", return_value=(0.1, 6)),
-                patch.object(train, "evaluate", return_value=worse),
+                patch.object(training_workflow, "train_one_epoch", return_value=(0.1, 6)),
+                patch.object(training_workflow, "evaluate", return_value=worse),
             ):
                 self.run_training(output_dir, 2, checkpoint)
             self.assertEqual((output_dir / "best.pt").read_bytes(), original_best)
@@ -270,8 +271,8 @@ class ResumeTrainingTests(unittest.TestCase):
 
             better = {"rmse_cm": {"all": best_rmse - 1}, "mae_cm": {"all": 8.0}}
             with (
-                patch.object(train, "train_one_epoch", return_value=(0.1, 9)),
-                patch.object(train, "evaluate", return_value=better),
+                patch.object(training_workflow, "train_one_epoch", return_value=(0.1, 9)),
+                patch.object(training_workflow, "evaluate", return_value=better),
             ):
                 self.run_training(output_dir, 3, checkpoint)
             selected = torch.load(output_dir / "best.pt", map_location="cpu", weights_only=True)

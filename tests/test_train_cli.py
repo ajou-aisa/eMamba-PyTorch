@@ -12,6 +12,7 @@ from torch.utils.data import DataLoader, TensorDataset
 
 import train
 from training import session as training_session
+from training import workflow as training_workflow
 
 
 class TrainCliTests(unittest.TestCase):
@@ -28,8 +29,8 @@ class TrainCliTests(unittest.TestCase):
                 ]),
                 patch.object(training_session, "build_dataloaders", return_value={"train": loader}),
                 patch.object(training_session, "training_data_fingerprint", return_value="a" * 64),
-                patch.object(train, "diagnose_delta", return_value=[]),
-                patch.object(train, "train_one_epoch", return_value=(0.0, 1)),
+                patch.object(training_workflow, "diagnose_delta", return_value=[]),
+                patch.object(training_workflow, "train_one_epoch", return_value=(0.0, 1)),
                 contextlib.redirect_stdout(output),
             ):
                 # When: the smoke CLI branch runs.
@@ -55,9 +56,9 @@ class TrainCliTests(unittest.TestCase):
                     "train.py", "--mode", "eval", "--device", "cpu", "--split", "test",
                     "--checkpoint", str(checkpoint), "--json-stdout",
                 ]),
-                patch.object(train, "load_checkpoint", return_value=(None, {})) as load,
-                patch.object(train, "build_dataloaders", return_value={"test": loader}) as build,
-                patch.object(train, "evaluate", return_value={
+                patch.object(training_workflow, "load_checkpoint", return_value=(None, {})) as load,
+                patch.object(training_workflow, "build_dataloaders", return_value={"test": loader}) as build,
+                patch.object(training_workflow, "evaluate", return_value={
                     "split": "test", "checkpoint": str(checkpoint), "samples": 1,
                 }) as evaluate,
                 contextlib.redirect_stdout(output),

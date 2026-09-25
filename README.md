@@ -15,7 +15,11 @@ models/mamba/selective_ssm.py sequential selective recurrence
 models/emamba.py              Patch, two blocks, OutputHead
 models/q_emamba.py            INT8 PTQ Patch, quantized blocks, OutputHead
 models/output_head.py         flatten readout and a 320 -> 20 -> 57 MLP
-train.py                      CLI, device/data setup, smoke/train/eval control
+train.py                      CLI argument parsing and entry point
+training/data.py             deterministic MARS split and DataLoader setup
+training/runtime.py          device, FP32 precision, and seed setup
+training/session.py          fresh and resumed run initialization
+training/workflow.py         smoke/train/eval orchestration
 training/engine.py            PyTorch train epoch and inference evaluation
 training/metrics.py           MARS CPU FP64 tensor accumulator
 training/checkpoint.py        checkpoint save/load and run metadata
@@ -189,7 +193,7 @@ scheduler.
 Training stops after **15 consecutive epochs without a strictly lower
 validation mean RMSE**. The stopping epoch is still saved to `last.pt` and
 `history.jsonl`; `best.pt` remains the checkpoint with the lowest validation
-mean RMSE. Scheduler and early-stopping settings are fixed in `train.py`,
+mean RMSE. Scheduler and early-stopping settings are fixed in `training/workflow.py`,
 without dedicated CLI options.
 
 ## Reproduction choices to confirm
