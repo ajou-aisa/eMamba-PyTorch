@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Literal
 import torch
 from torch.utils.data import DataLoader
+from models.emamba import NonlinearPolicy
 from models.q_emamba import QEMamba
 from ptq.calibrate import (ProfileObserver, candidate_profiles, collect_calibration,
                            index_hash, profile_hash, select_indices)
@@ -44,16 +45,19 @@ def _codes_equal(before: torch.nn.Module, after: torch.nn.Module, loader: DataLo
     return True, compared
 def convert(checkpoint: Path, output_dir: Path, data_root: Path, split: Split,
             device: torch.device, *, batch_size: int = 64,
-            calibration_count: int = 2_048, use_pwl: bool = False,
+            calibration_count: int = 2_048, use_pwl: bool | None = None,
+            legacy_nonlinear: NonlinearPolicy | None = None,
             precision: dict[str, str] | None = None) -> WorkflowReport:
-    output_dir.mkdir(parents=True, exist_ok=False)
+    if output_dir.exists():
+        raise FileExistsError(output_dir)
     if not checkpoint.is_file():
         raise FileNotFoundError(checkpoint)
     precision = configure_fp32(device) if precision is None else precision
     requested = ("train", "validation") if split == "validation" else (
         "train", "validation", "test")
     loaders = build_dataloaders(data_root, requested, batch_size, 0)
-    source, payload = load_checkpoint(checkpoint, device)
+    source, payload = load_checkpoint(checkpoint, device, legacy_nonlinear=legacy_nonlinear)
+    use_pwl = source.nonlinear_policy == "piecewise_fp32" if use_pwl is None else use_pwl
     baseline = evaluate(source, loaders[split], device, split, str(checkpoint))
     observer = ProfileObserver()
     profiling = QEMamba(source, QuantRuntime.profiling(observer, use_pwl=use_pwl)).to(device)
@@ -82,6 +86,7 @@ def convert(checkpoint: Path, output_dir: Path, data_root: Path, split: Split,
         json.dumps(hashes, sort_keys=True).encode()).hexdigest(), "dataset_hashes": json.dumps(hashes,
         sort_keys=True), "indices_sha256": index_hash(source_indices),
         "calibration_indices": json.dumps(source_indices), "sample_count": len(indices), "seed": 0}
+    output_dir.mkdir(parents=True, exist_ok=False)
     artifact_path = output_dir / "quantized.pt"
     save_quantized(artifact_path, source, profile, payload["model_config"], provenance, use_pwl)
     loaded = load_quantized(artifact_path)

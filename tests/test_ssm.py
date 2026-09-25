@@ -4,6 +4,7 @@ import unittest
 import torch
 
 from models.mamba.selective_ssm import SelectiveSSM
+from ptq.piecewise import piecewise_exp
 
 
 class SelectiveSSMTests(unittest.TestCase):
@@ -41,23 +42,30 @@ class SelectiveSSMTests(unittest.TestCase):
         torch.testing.assert_close(delta, torch.tensor([[[1.0, 1.0], [0.0, 0.0]]]))
 
     def test_recurrence_matches_independent_reference(self) -> None:
-        torch.manual_seed(7)
         model = SelectiveSSM(2, 2, 1)
-        tokens = torch.randn(2, 3, 2)
+        with torch.no_grad():
+            model.ssm_param_proj.weight[0].fill_(-0.5)
+            model.ssm_param_proj.weight[1:].fill_(0.5)
+            model.delta_proj.weight.fill_(-1)
+            model.delta_proj.bias.fill_(-0.25)
+        tokens = torch.tensor(
+            [[[1.0, 1.0], [1.0, 2.0], [2.0, 1.0]],
+             [[2.0, 2.0], [1.0, 3.0], [3.0, 1.0]]]
+        )
         parameters = model.ssm_param_proj(tokens)
         features, input_b, output_c = parameters.split((1, 2, 2), dim=-1)
-        delta = model.delta_proj(features).clamp_min(0)
+        delta = torch.relu(model.delta_proj(features))
         a = -model.a_log.exp()
         state = torch.zeros(2, 2, 2)
         expected = []
         for step in range(3):
-            transition = (delta[:, step, :, None] * a[None]).exp()
+            transition = piecewise_exp(delta[:, step, :, None] * a[None])
             injection = delta[:, step, :, None] * input_b[:, step, None, :] * tokens[:, step, :, None]
             state = transition * state + injection
             expected.append((state * output_c[:, step, None, :]).sum(-1) + model.d_skip * tokens[:, step])
         torch.testing.assert_close(model(tokens), torch.stack(expected, dim=1))
 
-        a_bar = (delta[..., None] * a).exp()
+        a_bar = piecewise_exp(delta[..., None] * a)
         self.assertTrue(torch.all((a_bar >= 0) & (a_bar <= 1)))
 
     def test_forward_backward_are_finite_and_state_resets(self) -> None:

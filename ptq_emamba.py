@@ -6,6 +6,7 @@ from typing import Literal, Sequence, assert_never
 
 import torch
 
+from models.emamba import NonlinearPolicy
 from ptq.calibrate import profile_hash
 from ptq.io import load_quantized
 from ptq.report import ArtifactReport, WorkflowReport
@@ -27,7 +28,8 @@ class Arguments:
     split: Split
     device: DeviceName
     batch_size: int
-    piecewise: bool
+    piecewise: bool | None
+    legacy_nonlinear: NonlinearPolicy | None
 
 
 class CLIError(RuntimeError):
@@ -43,14 +45,20 @@ def parse_args(argv: Sequence[str] | None = None) -> Arguments:
     parser.add_argument("--split", choices=("validation", "test"), default="validation")
     parser.add_argument("--device", choices=("auto", "cpu", "cuda"), default="auto")
     parser.add_argument("--batch-size", type=int, default=64)
-    parser.add_argument("--piecewise", action="store_true", help="Calibrate with piecewise SiLU/exp")
+    nonlinear = parser.add_mutually_exclusive_group()
+    nonlinear.add_argument("--piecewise", dest="piecewise", action="store_const", const=True,
+                           default=None, help="Use piecewise SiLU/exp for PTQ")
+    nonlinear.add_argument("--native", dest="piecewise", action="store_const", const=False,
+                           help="Use native SiLU/exp for PTQ")
+    parser.add_argument("--legacy-nonlinear", choices=("native_fp32", "piecewise_fp32"),
+                        help="Resolve an untagged checkpoint with ambiguous provenance")
     raw = parser.parse_args(argv)
     if raw.checkpoint is not None and raw.output_dir is None:
         parser.error("--checkpoint requires --output-dir")
     if raw.artifact is not None and raw.output_dir is not None:
         parser.error("--output-dir is only valid with --checkpoint")
-    if raw.artifact is not None and raw.piecewise:
-        parser.error("--artifact uses its saved nonlinear policy; omit --piecewise")
+    if raw.artifact is not None and (raw.piecewise is not None or raw.legacy_nonlinear is not None):
+        parser.error("--artifact uses its saved nonlinear policy; omit nonlinear overrides")
     if raw.batch_size <= 0:
         parser.error("--batch-size must be positive")
     return Arguments(**vars(raw))
@@ -79,7 +87,8 @@ def run(arguments: Arguments) -> WorkflowReport | ArtifactReport:
                 raise CLIError("conversion output directory is missing")
             return convert(checkpoint, arguments.output_dir, arguments.data_root,
                            arguments.split, device, batch_size=arguments.batch_size,
-                           precision=precision, use_pwl=arguments.piecewise)
+                           precision=precision, use_pwl=arguments.piecewise,
+                           legacy_nonlinear=arguments.legacy_nonlinear)
         case None, artifact if artifact is not None:
             loaded = load_quantized(artifact)
             initial_hash = profile_hash(loaded.profile)

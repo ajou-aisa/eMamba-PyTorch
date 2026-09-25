@@ -12,7 +12,7 @@ import torch
 from torch import nn
 from torch.utils.data import ConcatDataset, DataLoader, random_split
 
-from datasets.mars import MARSDataset
+from datasets.mars import MARSDataset, training_data_fingerprint
 from models.emamba import EMamba
 from training.checkpoint import (
     BASELINE_ID, MODEL_DEFAULTS, capture_rng_state, delta_configuration,
@@ -26,7 +26,7 @@ from training.reporting import (
     print_resume_summary, print_run_summary, print_smoke_summary,
     print_training_summary,
 )
-from training.resume import validate_resume_files, validate_training_config
+from training.resume import STABLE_TRAINING_FIELDS, validate_resume_files, validate_training_config
 
 
 ROOT = Path(__file__).resolve().parent
@@ -53,8 +53,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--json-stdout", action="store_true")
     parser.add_argument("--checkpoint", type=Path)
     parser.add_argument("--resume", type=Path)
+    parser.add_argument("--legacy-nonlinear", choices=("native_fp32", "piecewise_fp32"))
     parser.add_argument("--split", choices=("validation", "test"))
     args = parser.parse_args()
+    if args.legacy_nonlinear is not None and args.resume is None and args.mode != "eval":
+        parser.error("--legacy-nonlinear requires --resume or --mode eval")
     if args.resume is not None:
         if args.mode != "train":
             parser.error("--resume is only valid with --mode train")
@@ -179,7 +182,8 @@ def main() -> None:
     precision = configure_fp32(device)
     show_progress = not args.no_progress and not args.json_stdout and sys.stderr.isatty()
     if args.mode == "eval":
-        model, _ = load_checkpoint(args.checkpoint, device)
+        model, _ = load_checkpoint(args.checkpoint, device,
+                                   legacy_nonlinear=args.legacy_nonlinear)
         loaders = build_dataloaders(
             args.data_root, (args.split,), args.batch_size, args.num_workers,
         )
@@ -200,6 +204,7 @@ def main() -> None:
         set_seed(args.seed)
         splits = ("train", "validation") if args.mode == "train" else ("train",)
         loaders = build_dataloaders(args.data_root, splits, args.batch_size, args.num_workers)
+        data_fingerprint = training_data_fingerprint(args.data_root)
         model_config = {**MODEL_DEFAULTS, "readout": args.readout}
         model = EMamba(**model_config).to(device).float()
         criterion = nn.MSELoss()
@@ -214,6 +219,7 @@ def main() -> None:
             "seed": args.seed, "num_workers": args.num_workers,
             "epochs": args.epochs if args.mode == "train" else None,
             "steps": args.steps if args.mode == "smoke" else None,
+            "training_data_sha256": data_fingerprint,
             "tf32": precision,
         }
         args.output_dir.mkdir(parents=True, exist_ok=False)
@@ -223,8 +229,15 @@ def main() -> None:
         best_epoch = 0
         best_validation = None
     else:
-        model, resume_payload = load_checkpoint(args.resume, device)
+        model, resume_payload = load_checkpoint(args.resume, device,
+                                                legacy_nonlinear=args.legacy_nonlinear)
         saved_config = validate_training_config(resume_payload)
+        saved_fingerprint = saved_config.get("training_data_sha256")
+        if saved_fingerprint is None:
+            warnings.warn("checkpoint lacks training data fingerprint; data identity is unverified",
+                          RuntimeWarning, stacklevel=1)
+        elif training_data_fingerprint(args.data_root) != saved_fingerprint:
+            raise ValueError("resume training data differs from checkpoint")
         checkpoint_epoch = resume_payload["epoch"]
         if type(checkpoint_epoch) is not int or checkpoint_epoch < 1:
             raise ValueError("resume checkpoint epoch is invalid")
@@ -236,8 +249,22 @@ def main() -> None:
         best_epoch, best_validation, config_present = validate_resume_files(
             args.output_dir, resume_payload,
         )
-        if not (args.output_dir / "best.pt").exists():
+        best_path = args.output_dir / "best.pt"
+        if not best_path.is_file():
             raise ValueError("resume experiment is missing best.pt")
+        best_model, best_payload = load_checkpoint(
+            best_path, torch.device("cpu"), legacy_nonlinear=args.legacy_nonlinear,
+        )
+        best_config = validate_training_config(best_payload)
+        if (best_payload.get("epoch") != best_epoch
+                or best_payload.get("best_validation_rmse_cm") != resume_payload["best_validation_rmse_cm"]
+                or best_payload.get("model_config") != resume_payload["model_config"]
+                or best_model.nonlinear_policy != model.nonlinear_policy
+                or best_config.get("training_data_sha256")
+                != saved_config.get("training_data_sha256")
+                or any(best_config[field] != saved_config[field]
+                       for field in STABLE_TRAINING_FIELDS)):
+            raise ValueError("best.pt conflicts with resume history or last.pt")
         if not config_present:
             warnings.warn("run_config.json is missing; using checkpoint and history only",
                           RuntimeWarning, stacklevel=1)
@@ -346,6 +373,30 @@ def main() -> None:
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
         optimizer, T_max=args.epochs, eta_min=1e-6,
     )
+    scheduler_epoch_offset = 0
+    if resume_payload is not None:
+        scheduler_state = resume_payload.get("scheduler_state_dict")
+        saved_offset = 0
+        if scheduler_state is not None:
+            saved_offset = resume_payload.get("scheduler_epoch_offset", 0)
+            if (not isinstance(scheduler_state, dict)
+                    or type(scheduler_state.get("last_epoch")) is not int
+                    or scheduler_state["last_epoch"] < 0
+                    or type(saved_offset) is not int or saved_offset < 0
+                    or scheduler_state["last_epoch"] + saved_offset != resume_payload["epoch"]
+                    or scheduler_state.get("T_max") != resume_payload["training_config"]["epochs"]
+                    or scheduler_state.get("eta_min") != 1e-6
+                    or scheduler_state.get("_last_lr")
+                    != [group["lr"] for group in optimizer.param_groups]):
+                raise ValueError("checkpoint scheduler state conflicts with optimizer or epoch")
+        if (scheduler_state is not None
+                and resume_payload["training_config"]["epochs"] == args.epochs):
+            scheduler.load_state_dict(scheduler_state)
+            scheduler_epoch_offset = saved_offset
+        else:
+            scheduler_epoch_offset = resume_payload["epoch"]
+            warnings.warn("scheduler restarts because its state or original epoch target is unavailable",
+                          RuntimeWarning, stacklevel=1)
 
     for epoch in range(start_epoch, args.epochs + 1):
         train_loss, global_step = train_one_epoch(
@@ -372,10 +423,14 @@ def main() -> None:
             save_checkpoint(
                 args.output_dir / "best.pt", model, optimizer, epoch, global_step,
                 best_rmse_cm, model_config, training_config, device, rng_state=rng_state,
+                scheduler_state=scheduler.state_dict(),
+                scheduler_epoch_offset=scheduler_epoch_offset,
             )
         save_checkpoint(
             args.output_dir / "last.pt", model, optimizer, epoch, global_step,
             best_rmse_cm, model_config, training_config, device, rng_state=rng_state,
+            scheduler_state=scheduler.state_dict(),
+            scheduler_epoch_offset=scheduler_epoch_offset,
         )
         record = {"epoch": epoch, "global_step": global_step, "train_loss": train_loss,
                   "validation": validation, "best_validation_rmse_cm": best_rmse_cm}

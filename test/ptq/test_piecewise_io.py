@@ -56,6 +56,14 @@ def test_artifact_restores_nonlinear_mode_and_exact_output(tmp_path: Path, use_p
 def test_piecewise_cli_is_explicit_and_cannot_override_saved_mode() -> None:
     args = parse_args(["--checkpoint", "best.pt", "--output-dir", "new", "--piecewise"])
     assert args.piecewise is True
-    assert parse_args(["--artifact", "quantized.pt"]).piecewise is False
+    assert parse_args(["--artifact", "quantized.pt"]).piecewise is None
+    assert parse_args(["--checkpoint", "best.pt", "--output-dir", "new"]).piecewise is None
+    assert parse_args(["--checkpoint", "best.pt", "--output-dir", "new", "--native"]).piecewise is False
+    assert parse_args(["--checkpoint", "best.pt", "--output-dir", "new",
+                       "--legacy-nonlinear", "native_fp32"]).legacy_nonlinear == "native_fp32"
     with pytest.raises(SystemExit):
         parse_args(["--artifact", "quantized.pt", "--piecewise"])
+    with pytest.raises(SystemExit):
+        parse_args(["--artifact", "quantized.pt", "--native"])
+    with pytest.raises(SystemExit):
+        parse_args(["--artifact", "quantized.pt", "--legacy-nonlinear", "native_fp32"])

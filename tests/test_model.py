@@ -87,12 +87,15 @@ class OutputHeadTests(unittest.TestCase):
         tokens = torch.tensor([[[1.0, 3.0], [5.0, 7.0]],
                                [[2.0, 4.0], [6.0, 8.0]]])
         head = OutputHead(2, 1, num_tokens=2)
+        first, last = head.proj[0], head.proj[2]
+        assert isinstance(first, torch.nn.Linear)
+        assert isinstance(last, torch.nn.Linear)
         with torch.no_grad():
-            head.proj[0].weight.copy_(torch.tensor([[1., 2., 3., 4.],
-                                                   [0., 0., 0., 0.]]))
-            head.proj[0].bias.zero_()
-            head.proj[2].weight.fill_(1.0)
-            head.proj[2].bias.zero_()
+            first.weight.copy_(torch.tensor([[1., 2., 3., 4.],
+                                             [0., 0., 0., 0.]]))
+            first.bias.zero_()
+            last.weight.fill_(1.0)
+            last.bias.zero_()
 
         torch.testing.assert_close(head(tokens), torch.tensor([[50.0], [60.0]]))
         torch.testing.assert_close(head(tokens.flip(1)), torch.tensor([[34.0], [44.0]]))

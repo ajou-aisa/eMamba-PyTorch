@@ -1,3 +1,4 @@
+import shutil
 import tempfile
 import unittest
 from pathlib import Path
@@ -5,6 +6,7 @@ from pathlib import Path
 import numpy as np
 import torch
 
+from datasets import mars
 from datasets.mars import MARSDataset
 
 
@@ -67,3 +69,18 @@ class TestMARSDataset(unittest.TestCase):
     def test_missing_file_error_identifies_split_and_path(self):
         with self.assertRaisesRegex(ValueError, f"train.*{self.feature_path}"):
             MARSDataset(self.feature_path, self.label_path)
+
+    def test_training_data_fingerprint_tracks_contents_across_roots(self):
+        source = self.root / "source"
+        source.mkdir()
+        for split in ("train", "validate"):
+            np.save(source / f"featuremap_{split}.npy", np.zeros((1, 8, 8, 5)))
+            np.save(source / f"labels_{split}.npy", np.zeros((1, 57)))
+        copy = self.root / "copy"
+        shutil.copytree(source, copy)
+
+        fingerprint = mars.training_data_fingerprint(source)
+        self.assertEqual(fingerprint, mars.training_data_fingerprint(copy))
+
+        np.save(copy / "labels_validate.npy", np.ones((1, 57)))
+        self.assertNotEqual(fingerprint, mars.training_data_fingerprint(copy))

@@ -11,13 +11,14 @@ from .selective_ssm import SelectiveSSM
 class EMambaBlock(nn.Module):
     """Interface: [B, L, D] -> [B, L, D]; internal width is ED."""
 
-    def __init__(self, d_model: int, expand: int, d_state: int) -> None:
+    def __init__(self, d_model: int, expand: int, d_state: int, *, use_pwl: bool = True) -> None:
         super().__init__()
         if d_model <= 0 or expand <= 0 or d_state <= 0:
             raise ValueError("d_model, expand, and d_state must be positive")
         self.d_model = d_model
         self.d_inner = d_model * expand
         self.d_state = d_state
+        self.use_pwl = use_pwl
 
         # dt_rank = ceil(D / 16)
         self.dt_rank = max(1, (d_model + 15) // 16)
@@ -26,7 +27,6 @@ class EMambaBlock(nn.Module):
 
         # Upper path: projection -> SiLU.
         self.gate_proj = nn.Linear(d_model, self.d_inner, bias=False)
-        # self.gate_act = nn.SiLU()
 
         # Lower path: projection -> convolution -> SSM.
         self.input_proj = nn.Linear(d_model, self.d_inner, bias=False)
@@ -35,6 +35,7 @@ class EMambaBlock(nn.Module):
             d_inner=self.d_inner,
             d_state=d_state,
             dt_rank=self.dt_rank,
+            use_pwl=use_pwl,
         )
 
         self.output_proj = nn.Linear(self.d_inner, d_model, bias=False)
@@ -50,8 +51,7 @@ class EMambaBlock(nn.Module):
 
         # Upper path
         gate = self.gate_proj(normalized)
-        # gate = self.gate_act(gate)
-        gate = piecewise_silu(gate)
+        gate = piecewise_silu(gate) if self.use_pwl else nn.functional.silu(gate)
 
         # Lower path
         hidden = self.input_proj(normalized)

@@ -36,6 +36,11 @@ def validate_training_config(payload: dict) -> dict:
         value = config[field]
         if type(value) is not int or value < lower_bound:
             raise ValueError(f"checkpoint training_config {field} is invalid")
+    if "training_data_sha256" in config:
+        fingerprint = config["training_data_sha256"]
+        if (not isinstance(fingerprint, str) or len(fingerprint) != 64
+                or any(char not in "0123456789abcdef" for char in fingerprint)):
+            raise ValueError("checkpoint training_config training_data_sha256 is invalid")
     return config
 
 
@@ -92,6 +97,10 @@ def _validate_run_config(path: Path, payload: dict, training_config: dict) -> No
             recorded = tuple(recorded)
         if recorded != checkpoint_value:
             raise ValueError(f"run_config.json training_config {field} conflicts with checkpoint")
+    if ("training_data_sha256" in training_config
+            and recorded_training.get("training_data_sha256")
+            != training_config["training_data_sha256"]):
+        raise ValueError("run_config.json training_data_sha256 conflicts with checkpoint")
 
 
 def validate_resume_files(directory: Path, payload: dict) -> tuple[int, dict | None, bool]:

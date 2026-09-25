@@ -2,11 +2,12 @@ import random
 import subprocess
 import sys
 from pathlib import Path
+from typing import Final
 
 import numpy as np
 import torch
 
-from models.emamba import EMamba
+from models.emamba import EMamba, NonlinearPolicy
 from models.mamba.block import EMambaBlock
 
 
@@ -16,6 +17,8 @@ MODEL_DEFAULTS = {
     "d_state": 8, "out_dim": 57, "in_channels": 5,
 }
 ROOT = Path(__file__).resolve().parents[1]
+_LAST_NATIVE_COMMIT: Final = "007ed66d386d366c90322d88288ecfb7e6fcbeee"
+_FIRST_PIECEWISE_COMMIT: Final = "b8c091a0b16347a94024b322682dfa0034e43565"
 
 
 def capture_rng_state() -> dict:
@@ -105,16 +108,38 @@ def git_value(*args: str) -> str | None:
     return process.stdout.strip() if process.returncode == 0 else None
 
 
+def _legacy_nonlinear_policy(payload: dict) -> NonlinearPolicy | None:
+    provenance = payload.get("git")
+    if not isinstance(provenance, dict) or provenance.get("dirty") is not False:
+        return None
+    commit = provenance.get("commit")
+    if not isinstance(commit, str) or len(commit) != 40 or any(
+        character not in "0123456789abcdef" for character in commit
+    ):
+        return None
+    if commit == _FIRST_PIECEWISE_COMMIT:
+        return "piecewise_fp32"
+    if commit == _LAST_NATIVE_COMMIT:
+        return "native_fp32"
+    ancestor = subprocess.run(
+        ("git", "merge-base", "--is-ancestor", commit, _LAST_NATIVE_COMMIT),
+        cwd=ROOT, capture_output=True, check=False,
+    )
+    return "native_fp32" if ancestor.returncode == 0 else None
+
+
 def save_checkpoint(
     path: Path, model: EMamba, optimizer: torch.optim.Optimizer,
     epoch: int, global_step: int, best_rmse_cm: float,
     model_config: dict, training_config: dict, device: torch.device,
-    *, rng_state: dict | None = None,
+    *, rng_state: dict | None = None, scheduler_state: dict | None = None,
+    scheduler_epoch_offset: int = 0,
 ) -> None:
     parameter_count, parameter_bytes = parameter_size(model)
     git_status = git_value("status", "--porcelain")
     payload = {
         "baseline_id": BASELINE_ID,
+        "nonlinear_policy": model.nonlinear_policy,
         "model_state_dict": model.state_dict(),
         "optimizer_state_dict": optimizer.state_dict(),
         "epoch": epoch, "global_step": global_step,
@@ -136,19 +161,41 @@ def save_checkpoint(
     }
     if rng_state is not None:
         payload["rng_state"] = rng_state
+    if scheduler_state is not None:
+        payload["scheduler_state_dict"] = scheduler_state
+        payload["scheduler_epoch_offset"] = scheduler_epoch_offset
     temporary = path.with_name(path.stem + ".tmp" + path.suffix)
     torch.save(payload, temporary)
     temporary.replace(path)
 
 
-def load_checkpoint(path: Path, device: torch.device) -> tuple[EMamba, dict]:
+def load_checkpoint(
+    path: Path, device: torch.device, *, legacy_nonlinear: NonlinearPolicy | None = None,
+) -> tuple[EMamba, dict]:
     payload = torch.load(path, map_location="cpu", weights_only=True)
     if payload.get("baseline_id") != BASELINE_ID:
         raise ValueError(f"checkpoint baseline_id must be {BASELINE_ID}")
     model_config = payload.get("model_config")
     if not isinstance(model_config, dict) or set(model_config) != set(MODEL_DEFAULTS) | {"readout"}:
         raise ValueError("checkpoint model_config is incomplete or unknown")
-    model = EMamba(**model_config)
+    if legacy_nonlinear is not None and legacy_nonlinear not in (
+        "native_fp32", "piecewise_fp32"
+    ):
+        raise ValueError("legacy nonlinear policy override is invalid")
+    if "nonlinear_policy" in payload:
+        policy = payload["nonlinear_policy"]
+        if policy not in ("native_fp32", "piecewise_fp32"):
+            raise ValueError("checkpoint nonlinear policy is invalid")
+        if legacy_nonlinear is not None and legacy_nonlinear != policy:
+            raise ValueError("legacy nonlinear policy conflicts with checkpoint")
+    else:
+        policy = legacy_nonlinear or _legacy_nonlinear_policy(payload)
+        if policy is None:
+            raise ValueError(
+                "checkpoint has ambiguous nonlinear policy; pass legacy_nonlinear="
+                "'native_fp32' or 'piecewise_fp32'"
+            )
+    model = EMamba(**model_config, nonlinear_policy=policy)
     if payload.get("readout") != model.head.readout:
         raise ValueError("checkpoint readout conflicts with model_config")
     if payload.get("delta_config") != delta_configuration(model):

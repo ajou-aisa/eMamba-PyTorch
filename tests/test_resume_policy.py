@@ -149,6 +149,12 @@ class ResumePolicyTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "training_config"):
             validate_training_config(payload)
 
+        payload = dict(self.payload)
+        payload["training_config"] = {**self.payload["training_config"],
+                                      "training_data_sha256": None}
+        with self.assertRaisesRegex(ValueError, "training_data_sha256"):
+            validate_training_config(payload)
+
 
 if __name__ == "__main__":
     unittest.main()

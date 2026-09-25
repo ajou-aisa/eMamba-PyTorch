@@ -7,7 +7,7 @@ from unittest.mock import patch
 import numpy as np
 import torch
 
-from models.emamba import EMamba
+from models.emamba import EMamba, NonlinearPolicy
 from training.checkpoint import (
     BASELINE_ID,
     MODEL_DEFAULTS,
@@ -41,12 +41,79 @@ class CheckpointTests(unittest.TestCase):
 
         torch.testing.assert_close(restored(frames), self.model(frames))
         self.assertEqual(payload["baseline_id"], BASELINE_ID)
+        self.assertEqual(payload["nonlinear_policy"], "piecewise_fp32")
+        self.assertEqual(restored.nonlinear_policy, "piecewise_fp32")
         self.assertEqual(payload["readout"], "flatten")
         self.assertEqual(payload["parameter_count"], parameter_size(self.model)[0])
         self.assertEqual(payload["fp32_parameter_bytes"], parameter_size(self.model)[1])
         self.assertIn("optimizer_state_dict", payload)
         self.assertIn("environment", payload)
         self.assertIn("git", payload)
+
+    def test_native_checkpoint_roundtrip_preserves_output(self) -> None:
+        model = EMamba(**self.model_config, nonlinear_policy="native_fp32")
+        frames = torch.randn(2, 8, 8, 5)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "native.pt"
+            save_checkpoint(path, model, torch.optim.Adam(model.parameters()), 1, 2, 1.0,
+                            self.model_config, {"seed": 0}, torch.device("cpu"))
+            restored, payload = load_checkpoint(path, torch.device("cpu"))
+        self.assertEqual(payload["nonlinear_policy"], "native_fp32")
+        self.assertEqual(restored.nonlinear_policy, "native_fp32")
+        torch.testing.assert_close(restored(frames), model(frames), rtol=0, atol=0)
+
+    def test_untagged_clean_checkpoint_uses_historical_policy(self) -> None:
+        commits: tuple[tuple[str, NonlinearPolicy], ...] = (
+            ("007ed66d386d366c90322d88288ecfb7e6fcbeee", "native_fp32"),
+            ("6c8e19c7c8cc06a742a17a2b768903646ce1c3e3", "native_fp32"),
+            ("b8c091a0b16347a94024b322682dfa0034e43565", "piecewise_fp32"),
+        )
+        frames = torch.randn(2, 8, 8, 5)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "legacy.pt"
+            for commit, policy in commits:
+                with self.subTest(policy=policy):
+                    model = EMamba(**self.model_config, nonlinear_policy=policy)
+                    save_checkpoint(path, model, torch.optim.Adam(model.parameters()), 1, 2, 1.0,
+                                    self.model_config, {"seed": 0}, torch.device("cpu"))
+                    payload = torch.load(path, map_location="cpu", weights_only=True)
+                    del payload["nonlinear_policy"]
+                    payload["git"] = {"commit": commit, "dirty": False}
+                    torch.save(payload, path)
+                    restored, _ = load_checkpoint(path, torch.device("cpu"))
+                    self.assertEqual(restored.nonlinear_policy, policy)
+                    torch.testing.assert_close(restored(frames), model(frames), rtol=0, atol=0)
+
+    def test_untagged_ambiguous_checkpoint_requires_explicit_policy(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "legacy.pt"
+            self.save(path)
+            payload = torch.load(path, map_location="cpu", weights_only=True)
+            del payload["nonlinear_policy"]
+            payload["git"] = {
+                "commit": "007ed66d386d366c90322d88288ecfb7e6fcbeee", "dirty": True,
+            }
+            torch.save(payload, path)
+            with self.assertRaisesRegex(ValueError, "ambiguous nonlinear policy"):
+                load_checkpoint(path, torch.device("cpu"))
+            restored, _ = load_checkpoint(
+                path, torch.device("cpu"), legacy_nonlinear="piecewise_fp32",
+            )
+        self.assertEqual(restored.nonlinear_policy, "piecewise_fp32")
+
+    def test_rejects_invalid_or_conflicting_nonlinear_policy(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "model.pt"
+            self.save(path)
+            payload = torch.load(path, map_location="cpu", weights_only=True)
+            payload["nonlinear_policy"] = "unknown"
+            torch.save(payload, path)
+            with self.assertRaisesRegex(ValueError, "nonlinear policy"):
+                load_checkpoint(path, torch.device("cpu"))
+            payload["nonlinear_policy"] = "piecewise_fp32"
+            torch.save(payload, path)
+            with self.assertRaisesRegex(ValueError, "nonlinear policy"):
+                load_checkpoint(path, torch.device("cpu"), legacy_nonlinear="native_fp32")
 
     def test_load_uses_cpu_map_location(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

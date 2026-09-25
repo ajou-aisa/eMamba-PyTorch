@@ -1,8 +1,21 @@
+import hashlib
 from pathlib import Path
 
 import numpy as np
 import torch
 from torch.utils.data import Dataset
+
+
+def training_data_fingerprint(data_root: Path) -> str:
+    digest = hashlib.sha256()
+    for name in (
+        "featuremap_train.npy", "labels_train.npy",
+        "featuremap_validate.npy", "labels_validate.npy",
+    ):
+        with (data_root / name).open("rb") as source:
+            digest.update(name.encode("utf-8"))
+            digest.update(hashlib.file_digest(source, "sha256").digest())
+    return digest.hexdigest()
 
 
 class MARSDataset(Dataset):

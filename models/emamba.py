@@ -1,10 +1,14 @@
 """eMamba composition: patch embedding -> Mamba blocks -> output head."""
 
+from typing import Literal
+
 from torch import Tensor, nn
 
 from .mamba import EMambaBlock
 from .output_head import OutputHead
 from .patch_embedding import PatchEmbedding
+
+NonlinearPolicy = Literal["native_fp32", "piecewise_fp32"]
 
 
 class EMamba(nn.Module):
@@ -20,11 +24,15 @@ class EMamba(nn.Module):
         out_dim: int = 57,
         in_channels: int = 5,
         readout: str = "flatten",
+        nonlinear_policy: NonlinearPolicy = "piecewise_fp32",
     ) -> None:
         super().__init__()
         if num_blocks <= 0:
             raise ValueError("num_blocks must be positive")
+        if nonlinear_policy not in ("native_fp32", "piecewise_fp32"):
+            raise ValueError("nonlinear policy must be native_fp32 or piecewise_fp32")
 
+        self.nonlinear_policy = nonlinear_policy
         self.d_model = d_model
         self.expand = expand
         self.patch_size = patch_size
@@ -37,7 +45,8 @@ class EMamba(nn.Module):
             d_model = d_model,
         )
         self.blocks = nn.ModuleList([
-            EMambaBlock(d_model = d_model, expand = expand, d_state = d_state)
+            EMambaBlock(d_model = d_model, expand = expand, d_state = d_state,
+                        use_pwl = nonlinear_policy == "piecewise_fp32")
             for _ in range(num_blocks)
         ])
         self.head = OutputHead(

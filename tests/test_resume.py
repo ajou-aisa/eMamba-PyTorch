@@ -41,6 +41,15 @@ class ResumeArgumentTests(unittest.TestCase):
         self.assertIsNone(args.lr)
         self.assertIsNone(args.batch_size)
 
+    def test_legacy_nonlinear_override_is_checkpoint_only(self) -> None:
+        eval_args = self.parse("--mode", "eval", "--checkpoint", "old.pt",
+                               "--legacy-nonlinear", "native_fp32")
+        self.assertEqual(eval_args.legacy_nonlinear, "native_fp32")
+        resume_args = self.parse("--mode", "train", "--resume", "results/example/last.pt",
+                                 "--epochs", "3", "--legacy-nonlinear", "piecewise_fp32")
+        self.assertEqual(resume_args.legacy_nonlinear, "piecewise_fp32")
+        self.reject("--mode", "train", "--legacy-nonlinear", "native_fp32")
+
     def test_resume_rejects_invalid_mode_path_and_explicit_overrides(self) -> None:
         base = ("--mode", "train", "--resume", "results/example/last.pt",
                 "--epochs", "3")
@@ -68,7 +77,10 @@ class ResumeTrainingTests(unittest.TestCase):
             "validation": DataLoader(dataset, batch_size=2, shuffle=False, num_workers=0),
         }
 
-    def run_training(self, output_dir: Path, epochs: int, resume: Path | None = None) -> None:
+    def run_training(
+        self, output_dir: Path, epochs: int, resume: Path | None = None,
+        fingerprint: str = "a" * 64,
+    ) -> None:
         args = argparse.Namespace(
             mode="train", device="cpu", data_root=output_dir,
             output_dir=output_dir, epochs=epochs, steps=None,
@@ -78,11 +90,13 @@ class ResumeTrainingTests(unittest.TestCase):
             readout="flatten" if resume is None else None,
             num_workers=0 if resume is None else None,
             checkpoint=None, split=None, resume=resume,
+            legacy_nonlinear=None,
             debug_numerics=False, no_progress=True, json_stdout=True,
         )
         with (
             patch.object(train, "parse_args", return_value=args),
             patch.object(train, "build_dataloaders", side_effect=self.loaders),
+            patch.object(train, "training_data_fingerprint", return_value=fingerprint, create=True),
             contextlib.redirect_stdout(io.StringIO()),
         ):
             train.main()
@@ -93,7 +107,16 @@ class ResumeTrainingTests(unittest.TestCase):
             full = root / "full"
             split = root / "split"
             self.run_training(full, 4)
-            self.run_training(split, 2)
+            train_epoch = train.train_one_epoch
+
+            def interrupt_after_two_epochs(*args, **kwargs):
+                if args[5] == 3:
+                    raise RuntimeError("training interrupted")
+                return train_epoch(*args, **kwargs)
+
+            with patch.object(train, "train_one_epoch", side_effect=interrupt_after_two_epochs):
+                with self.assertRaisesRegex(RuntimeError, "training interrupted"):
+                    self.run_training(split, 4)
             self.run_training(split, 4, split / "last.pt")
             full_state = torch.load(full / "last.pt", map_location="cpu", weights_only=True)
             split_state = torch.load(split / "last.pt", map_location="cpu", weights_only=True)
@@ -123,6 +146,66 @@ class ResumeTrainingTests(unittest.TestCase):
                     with self.assertRaisesRegex(ValueError, "already at epoch 2"):
                         self.run_training(output_dir, target, output_dir / "last.pt")
 
+    def test_resume_rejects_best_checkpoint_with_wrong_metadata(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            output_dir = Path(directory) / "run"
+            self.run_training(output_dir, 2)
+            best_path = output_dir / "best.pt"
+            best = torch.load(best_path, map_location="cpu", weights_only=True)
+            original_epoch = best["epoch"]
+            best["epoch"] = 99
+            torch.save(best, best_path)
+
+            with self.assertRaisesRegex(ValueError, "best.pt"):
+                self.run_training(output_dir, 3, output_dir / "last.pt")
+
+            best["epoch"] = original_epoch
+            best["training_config"]["training_data_sha256"] = "b" * 64
+            torch.save(best, best_path)
+            with self.assertRaisesRegex(ValueError, "best.pt"):
+                self.run_training(output_dir, 3, output_dir / "last.pt")
+
+    def test_resume_rejects_changed_training_data(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            output_dir = Path(directory) / "run"
+            self.run_training(output_dir, 1)
+            with self.assertRaisesRegex(ValueError, "training data"):
+                self.run_training(output_dir, 2, output_dir / "last.pt", "b" * 64)
+
+    def test_resume_rejects_stale_scheduler_phase(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            output_dir = Path(directory) / "run"
+            self.run_training(output_dir, 1)
+            path = output_dir / "last.pt"
+            payload = torch.load(path, map_location="cpu", weights_only=True)
+            payload["scheduler_state_dict"]["last_epoch"] = 0
+            torch.save(payload, path)
+            with self.assertRaisesRegex(ValueError, "scheduler state"):
+                self.run_training(output_dir, 2, path)
+
+    def test_legacy_untagged_best_allows_second_resume(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            output_dir = Path(directory) / "run"
+            self.run_training(output_dir, 1)
+            first_rmse = torch.load(output_dir / "best.pt", weights_only=True)[
+                "best_validation_rmse_cm"
+            ]
+            for name in ("best.pt", "last.pt"):
+                path = output_dir / name
+                payload = torch.load(path, map_location="cpu", weights_only=True)
+                del payload["nonlinear_policy"]
+                payload["git"] = {
+                    "commit": "b8c091a0b16347a94024b322682dfa0034e43565",
+                    "dirty": False,
+                }
+                torch.save(payload, path)
+
+            worse = {"rmse_cm": {"all": first_rmse + 1}, "mae_cm": {"all": 10.0}}
+            with patch.object(train, "evaluate", return_value=worse):
+                self.run_training(output_dir, 2, output_dir / "last.pt")
+            self.assertNotIn("nonlinear_policy", torch.load(output_dir / "best.pt", weights_only=True))
+            self.run_training(output_dir, 3, output_dir / "last.pt")
+
     def test_resume_restores_adamw_and_saved_learning_rate(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             output_dir = Path(directory) / "run"
@@ -136,6 +219,9 @@ class ResumeTrainingTests(unittest.TestCase):
             payload = torch.load(output_dir / "last.pt", weights_only=True)
             self.assertEqual(payload["epoch"], 2)
             self.assertEqual(payload["global_step"], 6)
+            self.assertEqual(payload["scheduler_epoch_offset"], 1)
+            self.assertEqual(payload["scheduler_state_dict"]["last_epoch"]
+                             + payload["scheduler_epoch_offset"], payload["epoch"])
             self.assertTrue(all(state["step"].item() == 6 for state in optimizer.state.values()))
 
     def test_resume_preserves_legacy_adam_optimizer(self) -> None:

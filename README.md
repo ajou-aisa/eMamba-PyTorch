@@ -141,6 +141,12 @@ checkpoint; CLI hyperparameter overrides are rejected. The existing
 but FP32 remains required. Resume starts at the next **whole epoch**;
 mid-epoch batches are not restored.
 
+New `training_config` records a SHA-256 fingerprint of the four train and
+validation feature/label `.npy` files. Resume rejects changed training data;
+older checkpoints without this fingerprint warn that data identity is
+unverified. Resume also checks `best.pt` against `last.pt` and the history,
+including its epoch, best score, nonlinear policy, and training settings.
+
 New checkpoints include Python, NumPy, Torch, and available CUDA/MPS RNG
 state. The current train DataLoader uses Torch's global RNG for shuffling,
 so restoring that state preserves its order. Older checkpoints without
@@ -149,12 +155,12 @@ warning; their continuation cannot be bitwise identical to an uninterrupted
 run. Cross-device continuation is supported, though backend arithmetic and
 unavailable target-device RNG state can also prevent bitwise equivalence.
 
-**Scheduler limitation:** checkpoints do not save scheduler state. Resume
-restores the optimizer's saved learning rate, then constructs a new
-`CosineAnnealingLR` with `T_max` equal to the requested total `--epochs`.
-It does not restore the previous cosine schedule position, so resumed
-training is not equivalent to an uninterrupted run even with RNG restored.
-Early stopping uses the best epoch recovered from `history.jsonl`.
+New checkpoints save scheduler state. Resuming with the same planned
+`--epochs` restores its position exactly. Changing the epoch target, or
+resuming an older checkpoint without scheduler state, restarts the cosine
+schedule from the saved optimizer learning rate with a warning; that path is
+not bitwise equivalent to an uninterrupted run. Early stopping uses the best
+epoch recovered from `history.jsonl`.
 
 ## Training behavior
 
@@ -167,8 +173,9 @@ these detailed checks by default.
 
 Defaults: one epoch, AdamW (lr 0.001, betas 0.9/0.999, weight decay 0.01),
 MSE loss, batch size 128, gradient norm cap 1.0, seed 0, `num_workers=0`,
-flatten readout, FP32. These are provisional training choices, not confirmed
-paper settings. `--device auto` chooses CUDA, then MPS, then CPU.
+flatten readout, FP32 with piecewise SiLU/exp. These are provisional training
+choices, not confirmed paper settings. `--device auto` chooses CUDA, then
+MPS, then CPU.
 Unavailable requested devices fail. On CUDA, TF32 is disabled for matmul
 and convolution and the applied API/settings are printed. No AMP,
 quantization, QAT, or test-based checkpoint selection is implemented.
@@ -234,26 +241,34 @@ for current training runs:
 | `global_step` | Number of optimizer steps completed |
 | `best_validation_rmse_cm` | Lowest validation mean RMSE observed so far, in cm |
 | `baseline_id` | `provisional_fp32_v2_flatten` |
+| `nonlinear_policy` | `piecewise_fp32` for fresh runs; saved policy is restored on load |
 | `model_config` | `d_model`, `expand`, `patch_size`, `num_blocks`, `d_state`, `out_dim`, `in_channels`, `readout` |
 | `readout` | `flatten` |
-| `training_config` | Precision, optimizer, initial learning rate, betas, weight decay, loss, batch size, gradient clip, seed, workers, epochs, steps, TF32 settings |
+| `training_config` | Precision, optimizer, initial learning rate, betas, weight decay, loss, batch size, gradient clip, seed, workers, epochs, steps, TF32 settings, train/validation data SHA-256 |
 | `delta_config` | Delta activation and initialization settings |
 | `parameter_count` | 15,717 |
 | `fp32_parameter_bytes` | 62,868; parameter storage only, not serialized file size |
 | `environment` | Python, PyTorch, NumPy versions and training device |
 | `git` | Commit, dirty flag, and MARS submodule commit when available |
 | `rng_state` | Python, NumPy, Torch, available CUDA/MPS states, and device RNG support flags |
+| `scheduler_state_dict` | Cosine scheduler state, including its epoch position and planned target |
+| `scheduler_epoch_offset` | Global epoch offset when a resumed run restarted its cosine schedule |
 
 The model tensors include Linear/Conv weights and biases, RangeNorm
 `gamma`/`beta`, and SSM `a_log`/`d_skip`. The effective `A=-exp(a_log)` is
 computed during forward; input-dependent B, C, delta, activations, and
-recurrent hidden states are not stored as model parameters. INT8 weights,
-quantization scales/zero-points, and scheduler state are not included.
+recurrent hidden states are not stored as model parameters. INT8 weights and
+quantization scales/zero-points are not included.
 
 Loading uses `torch.load(..., map_location="cpu", weights_only=True)` and
 checks baseline, model/readout, delta settings, parameter count/size, and
 the model state dictionary. Older v1, pooled-readout, or
 pre-projection-ReLU checkpoints are incompatible with the current model.
+Older compatible checkpoints without `nonlinear_policy` are inferred only
+when clean, known Git provenance identifies their policy. If provenance is
+ambiguous, pass `--legacy-nonlinear native_fp32` or
+`--legacy-nonlinear piecewise_fp32` to `train.py` evaluation/resume or
+`ptq_emamba.py` conversion, according to the checkpoint's original behavior.
 
 ## Metrics and verification
 
@@ -307,6 +322,7 @@ checkpoint into a new result directory:
 
 ```bash
 .venv/bin/python -m pip install -r requirements-ptq.txt
+.venv/bin/python -m pytest -q tests test/ptq
 .venv/bin/python ptq_emamba.py \
   --checkpoint results/0922_1653_emamba_100ep_seed0/best.pt \
   --output-dir results/0922_1653_emamba_100ep_seed0_ptq_run01
@@ -339,7 +355,8 @@ to a common scale before integer addition; outputs are rounded ties-to-even,
 clipped to INT8, and dequantized to FP32 for the next layer. Calibration retains
 the floating-point path. RangeNorm and SSM state arithmetic remain integer;
 SiLU, exponential, delta products, gating, and residual addition remain FP32
-with quantized boundaries. It is not a claim of fully
+with quantized boundaries; SiLU/exp use the selected native or piecewise
+policy. It is not a claim of fully
 integer hardware execution or guaranteed reproduction of paper accuracy.
 
 RangeNorm follows the original operation order: mean, centering, centered
@@ -369,10 +386,12 @@ source-free reload reproduced output codes on every validation frame.
 The test row is an explicitly requested frozen-artifact evaluation; test data
 did not participate in calibration or profile selection.
 
-### Optional piecewise SiLU and exponential
+### Piecewise SiLU and exponential
 
-Add `--piecewise` when converting a checkpoint to use the sway software model's
-17-segment SiLU and 11-segment exponential approximation:
+PTQ conversion defaults to the source checkpoint's nonlinear policy. Fresh
+FP32 checkpoints use the sway software model's 17-segment SiLU and 11-segment
+exponential approximation, so no flag is needed for them. Use `--piecewise`
+to override a native checkpoint, or `--native` to override a piecewise one:
 
 ```bash
 .venv/bin/python ptq_emamba.py \
@@ -389,7 +408,8 @@ an input-code lookup table. SiLU uses 18 knots over `[-7,7]`, with zero/identity
 tails; exp uses 12 knots over `[-4,1]`, with zero/e tails. These are sway's own
 secant coefficients, not published author coefficients.
 
-The artifact records the nonlinear mode, knots, interpolation version and tail
-rules. Evaluate it with `--artifact <path>/quantized.pt --split test --device cuda`;
-the saved mode is restored automatically, so do not add `--piecewise` on reload.
-Artifacts created without `--piecewise` continue to use native SiLU and exp.
+The artifact records its nonlinear mode. Piecewise artifacts also record knots,
+interpolation version, and tail rules. Evaluate with
+`--artifact <path>/quantized.pt --split test --device cuda`;
+the saved mode is restored automatically, and nonlinear overrides are not
+accepted on reload.

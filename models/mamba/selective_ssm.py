@@ -11,7 +11,7 @@ from ptq.piecewise import piecewise_exp
 class SelectiveSSM(nn.Module):
     """Interface: [B, L, ED] -> [B, L, ED]."""
 
-    def __init__(self, d_inner: int, d_state: int, dt_rank: int) -> None:
+    def __init__(self, d_inner: int, d_state: int, dt_rank: int, *, use_pwl: bool = True) -> None:
         super().__init__()
         if d_inner <= 0 or d_state <= 0 or dt_rank <= 0:
             raise ValueError("d_inner, d_state, and dt_rank must be positive")
@@ -20,6 +20,7 @@ class SelectiveSSM(nn.Module):
         self.d_inner = d_inner
         #N
         self.d_state = d_state
+        self.use_pwl = use_pwl
 
         # Intermediate low-rank width of the delta projection.
         self.dt_rank = dt_rank
@@ -128,12 +129,8 @@ class SelectiveSSM(nn.Module):
 
             # A_bar_t = exp(Delta_t A)
             # [B,ED,1] * [ED,N] -> [B,ED,N]
-            # a_bar = torch.exp(
-            #     delta_t.unsqueeze(-1) * continuous_a
-            # )
-            a_bar = piecewise_exp(
-                delta_t.unsqueeze(-1) * continuous_a
-            )
+            exp_input = delta_t.unsqueeze(-1) * continuous_a
+            a_bar = piecewise_exp(exp_input) if self.use_pwl else torch.exp(exp_input)
 
             # B_bar_t = Delta_t B_t
             # [B,ED,1] * [B,1,N] -> [B,ED,N]
