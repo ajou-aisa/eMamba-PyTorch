@@ -54,6 +54,7 @@ class QuantRuntime:
     profile: QuantProfile | None
     observer: Observer | None
     _stats: QuantStatistics | None = field(default=None, repr=False, compare=False)
+    use_pwl: bool = field(default=False, kw_only=True)
     def __post_init__(self) -> None:
         if self.profile is not None and self.observer is not None:
             raise QuantizationError("runtime cannot profile and quantize simultaneously")
@@ -61,11 +62,11 @@ class QuantRuntime:
     def bypass(cls) -> "QuantRuntime":
         return cls(None, None, None)
     @classmethod
-    def profiling(cls, observer: Observer) -> "QuantRuntime":
-        return cls(None, observer, None)
+    def profiling(cls, observer: Observer, *, use_pwl: bool = False) -> "QuantRuntime":
+        return cls(None, observer, None, use_pwl=use_pwl)
     @classmethod
-    def frozen(cls, profile: QuantProfile) -> "QuantRuntime":
-        return cls(profile, None, QuantStatistics())
+    def frozen(cls, profile: QuantProfile, *, use_pwl: bool = False) -> "QuantRuntime":
+        return cls(profile, None, QuantStatistics(), use_pwl=use_pwl)
     @property
     def is_frozen(self) -> bool:
         return self.profile is not None

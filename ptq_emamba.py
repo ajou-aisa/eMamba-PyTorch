@@ -27,6 +27,7 @@ class Arguments:
     split: Split
     device: DeviceName
     batch_size: int
+    piecewise: bool
 
 
 class CLIError(RuntimeError):
@@ -42,11 +43,14 @@ def parse_args(argv: Sequence[str] | None = None) -> Arguments:
     parser.add_argument("--split", choices=("validation", "test"), default="validation")
     parser.add_argument("--device", choices=("auto", "cpu", "cuda"), default="auto")
     parser.add_argument("--batch-size", type=int, default=64)
+    parser.add_argument("--piecewise", action="store_true", help="Calibrate with piecewise SiLU/exp")
     raw = parser.parse_args(argv)
     if raw.checkpoint is not None and raw.output_dir is None:
         parser.error("--checkpoint requires --output-dir")
     if raw.artifact is not None and raw.output_dir is not None:
         parser.error("--output-dir is only valid with --checkpoint")
+    if raw.artifact is not None and raw.piecewise:
+        parser.error("--artifact uses its saved nonlinear policy; omit --piecewise")
     if raw.batch_size <= 0:
         parser.error("--batch-size must be positive")
     return Arguments(**vars(raw))
@@ -75,7 +79,7 @@ def run(arguments: Arguments) -> WorkflowReport | ArtifactReport:
                 raise CLIError("conversion output directory is missing")
             return convert(checkpoint, arguments.output_dir, arguments.data_root,
                            arguments.split, device, batch_size=arguments.batch_size,
-                           precision=precision)
+                           precision=precision, use_pwl=arguments.piecewise)
         case None, artifact if artifact is not None:
             loaded = load_quantized(artifact)
             initial_hash = profile_hash(loaded.profile)

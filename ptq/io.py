@@ -11,10 +11,12 @@ from models.q_emamba import QEMamba
 from ptq.parameters import export_parameters, restore_parameters
 from ptq.provenance import validate_provenance
 from ptq.quant import QuantProfile
+from ptq.piecewise import PIECEWISE_SPEC
 from training.checkpoint import MODEL_DEFAULTS
 _FORMAT = "emamba-ptq-v1"
 _POLICY = {"scale": "power_of_two", "zero_point": 0, "rounding": "ties_to_even",
            "clipping": "signed_saturating", "nonlinear": "native_fp32"}
+_PWL_POLICY = {**_POLICY, "nonlinear": "piecewise_fp32", "piecewise": PIECEWISE_SPEC}
 _STATE = {"current_bits": 24, "stored_bits": 17, "right_shift": 7,
           "output_uses_current": True}
 class ArtifactError(ValueError):
@@ -38,7 +40,7 @@ def _digest(metadata: dict, parameters: Mapping[str, Tensor]) -> str:
     return checksum.hexdigest()
 def save_quantized(
     path: Path, source: EMamba, profile: QuantProfile,
-    model_config: Mapping[str, int | str], provenance: Mapping[str, str | int],
+    model_config: Mapping[str, int | str], provenance: Mapping[str, str | int], use_pwl: bool = False,
 ) -> str:
     validate_provenance(provenance)
     parameters, descriptions = export_parameters(source, profile)
@@ -48,7 +50,8 @@ def save_quantized(
         "format": _FORMAT, "model_config": dict(model_config), "parameters": descriptions,
         "profile": profile.to_payload(), "norm_epsilon": {
             f"blocks.{index}.norm": block.norm.eps for index, block in enumerate(source.blocks)},
-        "quantization": _POLICY, "state": _STATE, "provenance": dict(provenance),
+        "quantization": _PWL_POLICY if use_pwl else _POLICY,
+        "state": _STATE, "provenance": dict(provenance),
         "versions": {"torch": str(torch.__version__),
                      "brevitas": importlib.metadata.version("brevitas")},
     }
@@ -67,7 +70,7 @@ def load_quantized(path: Path) -> LoadedArtifact:
     if (set(metadata) != required or metadata["format"] != _FORMAT
             or metadata["model_config"] != {**MODEL_DEFAULTS, "readout": "flatten"}):
         raise ArtifactError("artifact metadata is invalid")
-    if metadata["quantization"] != _POLICY or metadata["state"] != _STATE:
+    if metadata["quantization"] not in (_POLICY, _PWL_POLICY) or metadata["state"] != _STATE:
         raise ArtifactError("artifact numeric policy is invalid")
     descriptions = metadata["parameters"]
     if not isinstance(descriptions, dict) or set(descriptions) != set(parameters):
@@ -93,7 +96,7 @@ def load_quantized(path: Path) -> LoadedArtifact:
         profile = QuantProfile.from_payload(metadata["profile"])
         model = restore_parameters(
             metadata["model_config"], parameters, descriptions, profile,
-            metadata["norm_epsilon"],
+            metadata["norm_epsilon"], use_pwl=metadata["quantization"] == _PWL_POLICY,
         )
     except (AttributeError, KeyError, TypeError, ValueError, RuntimeError) as error:
         raise ArtifactError(f"artifact reconstruction failed: {error}") from error

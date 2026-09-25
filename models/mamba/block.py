@@ -2,6 +2,8 @@
 
 from torch import Tensor, nn
 
+from ptq.piecewise import piecewise_silu
+
 from .range_norm import RangeNorm
 from .selective_ssm import SelectiveSSM
 
@@ -24,7 +26,7 @@ class EMambaBlock(nn.Module):
 
         # Upper path: projection -> SiLU.
         self.gate_proj = nn.Linear(d_model, self.d_inner, bias=False)
-        self.gate_act = nn.SiLU()
+        # self.gate_act = nn.SiLU()
 
         # Lower path: projection -> convolution -> SSM.
         self.input_proj = nn.Linear(d_model, self.d_inner, bias=False)
@@ -48,7 +50,8 @@ class EMambaBlock(nn.Module):
 
         # Upper path
         gate = self.gate_proj(normalized)
-        gate = self.gate_act(gate)
+        # gate = self.gate_act(gate)
+        gate = piecewise_silu(gate)
 
         # Lower path
         hidden = self.input_proj(normalized)

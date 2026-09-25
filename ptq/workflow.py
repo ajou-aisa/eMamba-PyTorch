@@ -44,7 +44,7 @@ def _codes_equal(before: torch.nn.Module, after: torch.nn.Module, loader: DataLo
     return True, compared
 def convert(checkpoint: Path, output_dir: Path, data_root: Path, split: Split,
             device: torch.device, *, batch_size: int = 64,
-            calibration_count: int = 2_048,
+            calibration_count: int = 2_048, use_pwl: bool = False,
             precision: dict[str, str] | None = None) -> WorkflowReport:
     output_dir.mkdir(parents=True, exist_ok=False)
     if not checkpoint.is_file():
@@ -56,14 +56,14 @@ def convert(checkpoint: Path, output_dir: Path, data_root: Path, split: Split,
     source, payload = load_checkpoint(checkpoint, device)
     baseline = evaluate(source, loaders[split], device, split, str(checkpoint))
     observer = ProfileObserver()
-    profiling = QEMamba(source, QuantRuntime.profiling(observer)).to(device)
+    profiling = QEMamba(source, QuantRuntime.profiling(observer, use_pwl=use_pwl)).to(device)
     indices = select_indices(len(loaders["train"].dataset), calibration_count, 0)
     collect_calibration(profiling, loaders["train"].dataset, indices, device, batch_size)
     candidates = candidate_profiles(observer.snapshot())
     candidate_metrics, candidate_hashes = {}, {}
     selected, best = "max", float("inf")
     for name in ("max", "percentile"):
-        runtime = QuantRuntime.frozen(candidates[name])
+        runtime = QuantRuntime.frozen(candidates[name], use_pwl=use_pwl)
         model = QEMamba(source, runtime).to(device)
         metric = evaluate(model, loaders["validation"], device, "validation", str(checkpoint))
         candidate_metrics[name], candidate_hashes[name] = metric, profile_hash(candidates[name])
@@ -71,7 +71,7 @@ def convert(checkpoint: Path, output_dir: Path, data_root: Path, split: Split,
         if score < best:
             selected, best = name, score
     profile = candidates[selected]
-    runtime = QuantRuntime.frozen(profile)
+    runtime = QuantRuntime.frozen(profile, use_pwl=use_pwl)
     model = QEMamba(source, runtime).to(device)
     quantized = evaluate(model, loaders[split], device, split, str(checkpoint))
     statistics = {name: asdict(item) for name, item in runtime.statistics().items()}
@@ -83,7 +83,7 @@ def convert(checkpoint: Path, output_dir: Path, data_root: Path, split: Split,
         sort_keys=True), "indices_sha256": index_hash(source_indices),
         "calibration_indices": json.dumps(source_indices), "sample_count": len(indices), "seed": 0}
     artifact_path = output_dir / "quantized.pt"
-    save_quantized(artifact_path, source, profile, payload["model_config"], provenance)
+    save_quantized(artifact_path, source, profile, payload["model_config"], provenance, use_pwl)
     loaded = load_quantized(artifact_path)
     equal, compared = _codes_equal(model, loaded.model, loaders[split], device, loaded.profile)
     if not equal:

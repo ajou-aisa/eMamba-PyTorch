@@ -3,6 +3,7 @@ from torch import Tensor, nn
 
 from ptq.ops import dequantize_codes, integer_ssm_step
 from ptq.quant import QuantizationError, QuantRuntime
+from ptq.piecewise import piecewise_exp
 
 
 class QSelectiveSSM(nn.Module):
@@ -55,7 +56,7 @@ class QSelectiveSSM(nn.Module):
             exp_input = self.runtime.boundary(
                 f"{self.prefix}.expInput", delta_t.unsqueeze(-1) * continuous_a,
             )
-            a_bar = torch.exp(exp_input)
+            a_bar = piecewise_exp(exp_input) if self.runtime.use_pwl else torch.exp(exp_input)
             b_bar = delta_t.unsqueeze(-1) * input_b[:, step].unsqueeze(1)
             a_bar = self.runtime.boundary(f"{self.prefix}.Abar", a_bar)
             b_bar = self.runtime.boundary(f"{self.prefix}.Bbar", b_bar)
@@ -96,7 +97,7 @@ class QSelectiveSSM(nn.Module):
                 f"{self.prefix}.expInput", delta_t.unsqueeze(-1) * a,
             )
             # a_bar
-            a_bar = torch.exp(exp_input)
+            a_bar = piecewise_exp(exp_input) if self.runtime.use_pwl else torch.exp(exp_input)
             # b_bar
             b_bar = delta_t.unsqueeze(-1) * input_b[:, step].unsqueeze(1)
             # Quantization of Abar and Bbar

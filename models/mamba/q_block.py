@@ -2,6 +2,7 @@ import torch
 from torch import Tensor, nn
 
 from ptq.quant import QuantRuntime
+from ptq.piecewise import piecewise_silu
 
 
 class QBlock(nn.Module):
@@ -30,9 +31,9 @@ class QBlock(nn.Module):
         normalized = self.norm(tokens)
 
         # Upper path: projection(QLinear) -> SiLU.
-        gate = self.runtime.boundary(
-            f"{self.prefix}.gate", torch.nn.functional.silu(self.gate_proj(normalized)),
-        )
+        gate = self.gate_proj(normalized)
+        gate = piecewise_silu(gate) if self.runtime.use_pwl else torch.nn.functional.silu(gate)
+        gate = self.runtime.boundary(f"{self.prefix}.gate", gate)
 
         # Lower path: projection(QLinear) -> convolution(QConv1d) -> SSM(QSelectiveSSM).
         hidden = self.input_proj(normalized)

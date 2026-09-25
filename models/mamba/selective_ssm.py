@@ -5,6 +5,8 @@ import math
 import torch
 from torch import Tensor, nn
 
+from ptq.piecewise import piecewise_exp
+
 
 class SelectiveSSM(nn.Module):
     """Interface: [B, L, ED] -> [B, L, ED]."""
@@ -126,7 +128,10 @@ class SelectiveSSM(nn.Module):
 
             # A_bar_t = exp(Delta_t A)
             # [B,ED,1] * [ED,N] -> [B,ED,N]
-            a_bar = torch.exp(
+            # a_bar = torch.exp(
+            #     delta_t.unsqueeze(-1) * continuous_a
+            # )
+            a_bar = piecewise_exp(
                 delta_t.unsqueeze(-1) * continuous_a
             )
 

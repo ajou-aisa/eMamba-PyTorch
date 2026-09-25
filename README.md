@@ -368,3 +368,28 @@ source-free reload reproduced output codes on every validation frame.
 
 The test row is an explicitly requested frozen-artifact evaluation; test data
 did not participate in calibration or profile selection.
+
+### Optional piecewise SiLU and exponential
+
+Add `--piecewise` when converting a checkpoint to use the sway software model's
+17-segment SiLU and 11-segment exponential approximation:
+
+```bash
+.venv/bin/python ptq_emamba.py \
+  --checkpoint results/0922_1653_emamba_100ep_seed0/best.pt \
+  --output-dir results/0922_1653_emamba_100ep_seed0_ptq_pwl_run01 \
+  --piecewise --split validation --device cuda --batch-size 64
+```
+
+Use a fresh output directory for each conversion. The approximation applies to
+the existing gate SiLU and `Abar = exp(delta * A)` in both calibration and frozen
+inference. Delta retains ReLU; continuous `A = -exp(a_log)` is unchanged.
+The functions interpolate in FP32, then use the existing INT8 boundaries, without
+an input-code lookup table. SiLU uses 18 knots over `[-7,7]`, with zero/identity
+tails; exp uses 12 knots over `[-4,1]`, with zero/e tails. These are sway's own
+secant coefficients, not published author coefficients.
+
+The artifact records the nonlinear mode, knots, interpolation version and tail
+rules. Evaluate it with `--artifact <path>/quantized.pt --split test --device cuda`;
+the saved mode is restored automatically, so do not add `--piecewise` on reload.
+Artifacts created without `--piecewise` continue to use native SiLU and exp.

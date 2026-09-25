@@ -44,7 +44,7 @@ def export_parameters(
 def restore_parameters(
     model_config: Mapping[str, int | str], parameters: Mapping[str, Tensor],
     descriptions: Mapping[str, dict], profile: QuantProfile,
-    norm_epsilon: Mapping[str, float],
+    norm_epsilon: Mapping[str, float], *, use_pwl: bool = False,
 ) -> QEMamba:
     num_blocks = model_config.get("num_blocks")
     expected_norms = ({f"blocks.{index}.norm" for index in range(num_blocks)}
@@ -85,4 +85,4 @@ def restore_parameters(
         else:
             state[source_name] = restored
     source.load_state_dict(state, strict=True)
-    return QEMamba(source, QuantRuntime.frozen(profile), continuous_a=overrides)
+    return QEMamba(source, QuantRuntime.frozen(profile, use_pwl=use_pwl), continuous_a=overrides)
