@@ -28,6 +28,18 @@ def test_artifact_mode_defaults_to_validation_and_auto_device() -> None:
     assert arguments.device == "auto"
 
 
+@pytest.mark.parametrize("cuda_available, expected", [(True, "cuda"), (False, "cpu")])
+def test_auto_device_prefers_cuda_then_cpu(
+    monkeypatch: pytest.MonkeyPatch, cuda_available: bool, expected: str,
+) -> None:
+    # Given: a controlled CUDA availability result.
+    monkeypatch.setattr(ptq_emamba.torch.cuda, "is_available", lambda: cuda_available)
+    # When: PTQ resolves its automatic device.
+    selected = ptq_emamba.select_device("auto")
+    # Then: PTQ selects CUDA when available, otherwise CPU.
+    assert selected.type == expected
+
+
 def test_conversion_requires_a_fresh_output_directory(tmp_path: Path) -> None:
     # Given: conversion without its required destination.
     argv = ["--checkpoint", str(tmp_path / "best.pt")]

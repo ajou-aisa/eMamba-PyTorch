@@ -1,18 +1,14 @@
 import argparse
 import json
 import math
-import random
 import sys
 import warnings
 from pathlib import Path
-from typing import Final
 
-import numpy as np
 import torch
 from torch import nn
-from torch.utils.data import ConcatDataset, DataLoader, random_split
 
-from datasets.mars import MARSDataset, training_data_fingerprint
+from datasets.mars import training_data_fingerprint
 from models.emamba import EMamba
 from training.checkpoint import (
     BASELINE_ID, MODEL_DEFAULTS, capture_rng_state, delta_configuration,
@@ -20,6 +16,8 @@ from training.checkpoint import (
     save_checkpoint,
 )
 from training.diagnostics import diagnose_delta
+from training.data import SPLIT_FILES as SPLIT_FILES, SOURCE_SIZES as SOURCE_SIZES
+from training.data import SPLIT_SIZES, build_dataloaders
 from training.engine import GRADIENT_CLIP, evaluate, train_one_epoch
 from training.reporting import (
     print_epoch_header, print_epoch_result, print_eval_summary,
@@ -27,12 +25,10 @@ from training.reporting import (
     print_training_summary,
 )
 from training.resume import STABLE_TRAINING_FIELDS, validate_resume_files, validate_training_config
+from training.runtime import configure_fp32, select_device, set_seed
 
 
 ROOT = Path(__file__).resolve().parent
-SPLIT_FILES = {"train": "train", "validation": "validate", "test": "test"}
-SOURCE_SIZES: Final = {"train": 24066, "validation": 8033, "test": 7984}
-SPLIT_SIZES: Final = {"train": 25679, "validation": 6420, "test": 7984}
 
 
 def parse_args() -> argparse.Namespace:
@@ -109,71 +105,6 @@ def parse_args() -> argparse.Namespace:
         args.batch_size = 128 if args.batch_size is None else args.batch_size
         args.num_workers = 0 if args.num_workers is None else args.num_workers
     return args
-
-
-def select_device(requested: str) -> torch.device:
-    if requested == "auto":
-        requested = "cuda" if torch.cuda.is_available() else (
-            "mps" if torch.backends.mps.is_available() else "cpu"
-        )
-    if requested == "cuda" and not torch.cuda.is_available():
-        raise ValueError("CUDA was requested but is unavailable")
-    if requested == "mps" and not torch.backends.mps.is_available():
-        raise ValueError("MPS was requested but is unavailable")
-    return torch.device(requested)
-
-
-def configure_fp32(device: torch.device) -> dict[str, str]:
-    if device.type != "cuda":
-        return {"tf32": "not_applicable"}
-    if hasattr(torch.backends.cuda.matmul, "fp32_precision"):
-        torch.backends.cuda.matmul.fp32_precision = "ieee"
-        torch.backends.cudnn.fp32_precision = "ieee"
-        return {
-            "api": "fp32_precision",
-            "matmul": torch.backends.cuda.matmul.fp32_precision,
-            "convolution": torch.backends.cudnn.fp32_precision,
-        }
-    torch.backends.cuda.matmul.allow_tf32 = False
-    torch.backends.cudnn.allow_tf32 = False
-    return {"api": "allow_tf32", "matmul": "false", "convolution": "false"}
-
-
-def set_seed(seed: int) -> None:
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed_all(seed)
-
-
-def build_dataloaders(
-    data_root: Path, splits: tuple[str, ...], batch_size: int, num_workers: int,
-) -> dict[str, DataLoader]:
-    sources: dict[str, MARSDataset] = {}
-    for split, suffix in SPLIT_FILES.items():
-        features = data_root / f"featuremap_{suffix}.npy"
-        labels = data_root / f"labels_{suffix}.npy"
-        dataset = MARSDataset(features, labels)
-        if len(dataset) != SOURCE_SIZES[split]:
-            raise ValueError(
-                f"{split} at {data_root}: expected {SOURCE_SIZES[split]} samples, "
-                f"got {len(dataset)}"
-            )
-        sources[split] = dataset
-    partitions = random_split(
-        ConcatDataset([sources["train"], sources["validation"]]),
-        [SPLIT_SIZES["train"], SPLIT_SIZES["validation"]],
-        generator=torch.Generator().manual_seed(0),
-    )
-    datasets = {"train": partitions[0], "validation": partitions[1], "test": sources["test"]}
-    loaders = {}
-    for split in splits:
-        loaders[split] = DataLoader(
-            datasets[split], batch_size=batch_size, shuffle=split == "train",
-            num_workers=num_workers, drop_last=False,
-        )
-    return loaders
 
 
 def main() -> None:
