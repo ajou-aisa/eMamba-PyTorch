@@ -5,11 +5,11 @@ from pathlib import Path
 import pytest
 import torch
 
-import ptq.io as artifact_io
+import ptq.artifact as artifact_io
 import ptq.parameters as parameter_io
 from models.emamba import EMamba
 from ptq.calibrate import ProfileObserver, candidate_profiles
-from ptq.io import ArtifactError, load_quantized, save_quantized
+from ptq.artifact import ArtifactError, load_quantized, save_quantized
 from ptq.model import prepare_model
 from ptq.quant import QuantRuntime
 from training.checkpoint import MODEL_DEFAULTS

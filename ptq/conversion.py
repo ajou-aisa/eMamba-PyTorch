@@ -8,7 +8,7 @@ from torch.utils.data import DataLoader
 from models.emamba import NonlinearPolicy
 from ptq.calibrate import (ProfileObserver, candidate_profiles, collect_calibration,
                            index_hash, profile_hash, select_indices)
-from ptq.io import ArtifactError, load_quantized, save_quantized
+from ptq.artifact import ArtifactError, load_quantized, save_quantized
 from ptq.model import QEMamba
 from ptq.quant import QuantProfile, QuantRuntime
 from ptq.report import WorkflowReport

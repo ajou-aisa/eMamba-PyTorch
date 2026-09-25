@@ -5,10 +5,10 @@ import pytest
 import torch
 from torch.utils.data import DataLoader, Subset, TensorDataset
 
-import ptq.workflow as workflow
+import ptq.conversion as conversion
 from models.emamba import EMamba, NonlinearPolicy
 from ptq.calibrate import ProfileObserver, candidate_profiles
-from ptq.io import load_quantized
+from ptq.artifact import load_quantized
 from ptq.model import QEMamba, prepare_model
 from ptq.quant import QuantRuntime
 from ptq.report import JsonValue
@@ -47,13 +47,13 @@ def test_conversion_artifact_roundtrip_accepts_full_provenance(
                split: str, _checkpoint: str) -> Mapping[str, JsonValue]:
         return {"split": split, "samples": len(loader.dataset), "rmse_cm": {"all": 1.0}}
 
-    monkeypatch.setattr(workflow, "build_dataloaders", lambda *_args: loaders)
-    monkeypatch.setattr(workflow, "load_checkpoint", lambda *_args, **_kwargs: (source, {"model_config": config}))
-    monkeypatch.setattr(workflow, "collect_calibration", lambda *_args: None)
-    monkeypatch.setattr(workflow, "candidate_profiles", lambda _snapshot: {"max": profile, "percentile": profile})
-    monkeypatch.setattr(workflow, "evaluate", metric)
-    # When: workflow conversion uses the real artifact writer and loader.
-    result = workflow.convert(checkpoint, tmp_path / "result", tmp_path, "test",
+    monkeypatch.setattr(conversion, "build_dataloaders", lambda *_args: loaders)
+    monkeypatch.setattr(conversion, "load_checkpoint", lambda *_args, **_kwargs: (source, {"model_config": config}))
+    monkeypatch.setattr(conversion, "collect_calibration", lambda *_args: None)
+    monkeypatch.setattr(conversion, "candidate_profiles", lambda _snapshot: {"max": profile, "percentile": profile})
+    monkeypatch.setattr(conversion, "evaluate", metric)
+    # When: conversion conversion uses the real artifact writer and loader.
+    result = conversion.convert(checkpoint, tmp_path / "result", tmp_path, "test",
                               torch.device("cpu"), batch_size=1, calibration_count=1,
                               use_pwl=use_pwl)
     loaded = load_quantized(tmp_path / "result/quantized.pt")
