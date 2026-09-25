@@ -13,6 +13,7 @@ from torch.utils.data import DataLoader, TensorDataset
 import train
 from training import session as training_session
 from training import workflow as training_workflow
+from training.runtime import select_device
 
 
 class TrainCliTests(unittest.TestCase):
@@ -83,11 +84,11 @@ class TrainCliTests(unittest.TestCase):
         ):
             with self.subTest(cuda=cuda, mps=mps):
                 with (
-                    patch.object(train.torch.cuda, "is_available", return_value=cuda),
-                    patch.object(train.torch.backends.mps, "is_available", return_value=mps),
+                    patch.object(torch.cuda, "is_available", return_value=cuda),
+                    patch.object(torch.backends.mps, "is_available", return_value=mps),
                 ):
                     # When: the training CLI resolves its automatic device.
-                    selected = train.select_device("auto")
+                    selected = select_device("auto")
                 # Then: the highest-priority available device wins.
                 self.assertEqual(selected.type, expected)
 

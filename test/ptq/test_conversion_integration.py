@@ -52,7 +52,7 @@ def test_conversion_artifact_roundtrip_accepts_full_provenance(
     monkeypatch.setattr(conversion, "collect_calibration", lambda *_args: None)
     monkeypatch.setattr(conversion, "candidate_profiles", lambda _snapshot: {"max": profile, "percentile": profile})
     monkeypatch.setattr(conversion, "evaluate", metric)
-    # When: conversion conversion uses the real artifact writer and loader.
+    # When: conversion uses the real artifact writer and loader.
     result = conversion.convert(checkpoint, tmp_path / "result", tmp_path, "test",
                               torch.device("cpu"), batch_size=1, calibration_count=1,
                               use_pwl=use_pwl)

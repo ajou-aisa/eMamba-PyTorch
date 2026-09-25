@@ -14,6 +14,7 @@ import torch
 from torch.utils.data import DataLoader, TensorDataset
 
 import train
+from datasets.mars import SPLIT_SIZES, build_dataloaders
 from training import session as training_session
 from training import workflow as training_workflow
 
@@ -156,7 +157,7 @@ class TrainingEntryTests(unittest.TestCase):
             np.save(root / "featuremap_train.npy", np.zeros((1, 8, 8, 5)))
             np.save(root / "labels_train.npy", np.zeros((1, 57)))
             with self.assertRaisesRegex(ValueError, "train.*24066"):
-                train.build_dataloaders(root, ("train",), 128, 0)
+                build_dataloaders(root, ("train",), 128, 0)
 
     def test_split_ratio_coverage_pairs_and_reproducibility(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -174,8 +175,8 @@ class TrainingEntryTests(unittest.TestCase):
 
             expected = {"train": 25679, "validation": 6420, "test": 7984}
             rng_before = torch.get_rng_state()
-            loaders = train.build_dataloaders(root, tuple(expected), 128, 0)
-            self.assertEqual(train.SPLIT_SIZES, expected)
+            loaders = build_dataloaders(root, tuple(expected), 128, 0)
+            self.assertEqual(SPLIT_SIZES, expected)
             torch.testing.assert_close(torch.get_rng_state(), rng_before)
             memberships: dict[str, set[float]] = {}
             for split, loader in loaders.items():
@@ -197,7 +198,7 @@ class TrainingEntryTests(unittest.TestCase):
             )
 
             torch.manual_seed(987)
-            repeated = train.build_dataloaders(root, ("validation", "test"), 128, 0)
+            repeated = build_dataloaders(root, ("validation", "test"), 128, 0)
             for split, loader in repeated.items():
                 ids_seen = [sample_id for _, labels in loader
                             for sample_id in labels[:, 0].tolist()]

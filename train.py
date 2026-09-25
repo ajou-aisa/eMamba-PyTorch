@@ -1,16 +1,7 @@
 import argparse
 from pathlib import Path
 
-import torch as torch
-
 from training.checkpoint import BASELINE_ID
-from datasets.mars import (
-    SPLIT_FILES as SPLIT_FILES, SOURCE_SIZES as SOURCE_SIZES,
-    SPLIT_SIZES as SPLIT_SIZES, build_dataloaders as build_dataloaders,
-)
-from training.runtime import (
-    configure_fp32 as configure_fp32, select_device as select_device, set_seed as set_seed,
-)
 from training.workflow import run
 
 
