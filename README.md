@@ -150,7 +150,9 @@ batch size, learning rate, seed, and other training settings come from the
 checkpoint; CLI hyperparameter overrides are rejected. The existing
 `run_config.json` is checked and preserved. Device changes are allowed,
 but FP32 remains required. Resume starts at the next **whole epoch**;
-mid-epoch batches are not restored.
+mid-epoch batches are not restored. Training requires `native_fp32`;
+piecewise checkpoints are rejected for resume and remain usable for evaluation
+and PTQ conversion.
 
 New `training_config` records a SHA-256 fingerprint of the four train and
 validation feature/label `.npy` files. Resume rejects changed training data;
@@ -184,7 +186,8 @@ these detailed checks by default.
 
 Defaults: one epoch, AdamW (lr 0.001, betas 0.9/0.999, weight decay 0.01),
 MSE loss, batch size 128, gradient norm cap 1.0, seed 0, `num_workers=0`,
-flatten readout, FP32 with piecewise SiLU/exp. These are provisional training
+flatten readout, FP32 with native SiLU/exp. Train and smoke always use native
+nonlinear functions. These are provisional training
 choices, not confirmed paper settings. `--device auto` chooses CUDA, then
 MPS, then CPU.
 Unavailable requested devices fail. On CUDA, TF32 is disabled for matmul
@@ -252,7 +255,7 @@ for current training runs:
 | `global_step` | Number of optimizer steps completed |
 | `best_validation_rmse_cm` | Lowest validation mean RMSE observed so far, in cm |
 | `baseline_id` | `provisional_fp32_v2_flatten` |
-| `nonlinear_policy` | `piecewise_fp32` for fresh runs; saved policy is restored on load |
+| `nonlinear_policy` | `native_fp32` for train/smoke; resume requires native; evaluation restores the saved policy |
 | `model_config` | `d_model`, `expand`, `patch_size`, `num_blocks`, `d_state`, `out_dim`, `in_channels`, `readout` |
 | `readout` | `flatten` |
 | `training_config` | Precision, optimizer, initial learning rate, betas, weight decay, loss, batch size, gradient clip, seed, workers, epochs, steps, TF32 settings, train/validation data SHA-256 |
@@ -280,6 +283,7 @@ when clean, known Git provenance identifies their policy. If provenance is
 ambiguous, pass `--legacy-nonlinear native_fp32` or
 `--legacy-nonlinear piecewise_fp32` to `train.py` evaluation/resume or
 `ptq_emamba.py` conversion, according to the checkpoint's original behavior.
+Training resume accepts only the native policy.
 
 ## Metrics and verification
 
@@ -400,9 +404,9 @@ did not participate in calibration or profile selection.
 ### Piecewise SiLU and exponential
 
 PTQ conversion defaults to the source checkpoint's nonlinear policy. Fresh
-FP32 checkpoints use the sway software model's 17-segment SiLU and 11-segment
-exponential approximation, so no flag is needed for them. Use `--piecewise`
-to override a native checkpoint, or `--native` to override a piecewise one:
+FP32 training uses native SiLU/exp. Use `--piecewise` during PTQ conversion
+to apply the sway software model's 17-segment SiLU and 11-segment exponential
+approximation, or `--native` to override a piecewise checkpoint:
 
 ```bash
 .venv/bin/python ptq_emamba.py \

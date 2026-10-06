@@ -43,7 +43,7 @@ def create_training_session(
         loaders = build_dataloaders(args.data_root, splits, args.batch_size, args.num_workers)
         data_fingerprint = training_data_fingerprint(args.data_root)
         model_config = {**MODEL_DEFAULTS, "readout": args.readout}
-        model = EMamba(**model_config).to(device).float()
+        model = EMamba(**model_config, nonlinear_policy="native_fp32").to(device).float()
         criterion = nn.MSELoss()
         optimizer = torch.optim.AdamW(
             model.parameters(), lr=args.lr, betas=(0.9, 0.999), weight_decay=0.01,
@@ -68,6 +68,9 @@ def create_training_session(
     else:
         model, resume_payload = load_checkpoint(args.resume, device,
                                                 legacy_nonlinear=args.legacy_nonlinear)
+        if model.nonlinear_policy != "native_fp32":
+            message = "Training requires native_fp32; a piecewise checkpoint cannot be resumed."
+            raise ValueError(message)
         saved_config = validate_training_config(resume_payload)
         saved_fingerprint = saved_config.get("training_data_sha256")
         if saved_fingerprint is None:

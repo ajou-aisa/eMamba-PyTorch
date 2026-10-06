@@ -197,7 +197,7 @@ class ResumeTrainingTests(unittest.TestCase):
                 payload = torch.load(path, map_location="cpu", weights_only=True)
                 del payload["nonlinear_policy"]
                 payload["git"] = {
-                    "commit": "b8c091a0b16347a94024b322682dfa0034e43565",
+                    "commit": "007ed66d386d366c90322d88288ecfb7e6fcbeee",
                     "dirty": False,
                 }
                 torch.save(payload, path)
