@@ -1,0 +1,51 @@
+{
+  "baseline_id": "provisional_fp32_v2_flatten",
+  "delta_config": {
+    "delta_activation": "post_projection_relu",
+    "dt_init_max": 0.1,
+    "dt_init_min": 0.001,
+    "dt_init_scale": 0.001
+  },
+  "device": "cuda",
+  "fp32_parameter_bytes": 62868,
+  "mode": "train",
+  "model_config": {
+    "d_model": 20,
+    "d_state": 8,
+    "expand": 2,
+    "in_channels": 5,
+    "num_blocks": 2,
+    "out_dim": 57,
+    "patch_size": 2,
+    "readout": "flatten"
+  },
+  "parameter_count": 15717,
+  "precision": {
+    "api": "fp32_precision",
+    "convolution": "ieee",
+    "matmul": "ieee"
+  },
+  "training_config": {
+    "batch_size": 64,
+    "betas": [
+      0.9,
+      0.999
+    ],
+    "epochs": 100,
+    "gradient_clip": 1.0,
+    "loss": "MSELoss",
+    "lr": 0.001,
+    "num_workers": 0,
+    "optimizer": "AdamW",
+    "precision": "fp32",
+    "seed": 0,
+    "steps": null,
+    "tf32": {
+      "api": "fp32_precision",
+      "convolution": "ieee",
+      "matmul": "ieee"
+    },
+    "training_data_sha256": "0e996cc031de00902d4bc1432431537f878b2ac2d303230becf3358c306091d7",
+    "weight_decay": 0.01
+  }
+}
